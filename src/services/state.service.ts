@@ -1,9 +1,10 @@
-import { createActor, fromSnapshot } from 'xstate';
+import { createActor } from 'xstate';
 import { botMachine } from '../state/machine.js';
 import redis from '../redis/client.js';
-import { getStateKey, getStateSnapshotKey } from '../redis/keys.js';
+import { getStateKey } from '../redis/keys.js';
 import logger from '../utils/logger.js';
 import type { BotActor } from '../state/machine.js';
+import type { Scene } from '../state/types.js';
 
 export class StateService {
   private actors = new Map<number, BotActor>();
@@ -15,33 +16,31 @@ export class StateService {
 
     // Пытаемся восстановить состояние из Redis
     const stateKey = getStateKey(userId);
-    const snapshotKey = getStateSnapshotKey(userId);
 
     try {
-      const [stateJson, snapshotJson] = await Promise.all([
-        redis.get(stateKey),
-        redis.get(snapshotKey),
-      ]);
+      const stateJson = await redis.get(stateKey);
 
-      let actor: BotActor;
+      let actor: BotActor = createActor(botMachine);
+      actor.start();
 
-      if (snapshotJson) {
-        // Восстанавливаем из snapshot
+      if (stateJson) {
+        // Восстанавливаем состояние через события
         try {
-          const savedSnapshot = JSON.parse(snapshotJson);
-          const snapshot = fromSnapshot(savedSnapshot);
-          actor = createActor(botMachine, { snapshot });
-          actor.start();
-          logger.debug(`Restored state for user ${userId} from snapshot`);
+          const savedState = JSON.parse(stateJson) as Scene;
+          
+          // Переводим машину в нужное состояние через события
+          if (savedState === 'info') {
+            actor.send({ type: 'GO_TO_INFO' });
+          } else if (savedState === 'begin') {
+            actor.send({ type: 'GO_TO_BEGIN' });
+          } else {
+            actor.send({ type: 'GO_TO_START' });
+          }
+          
+          logger.debug(`Restored state for user ${userId}: ${savedState}`);
         } catch (error) {
-          logger.warn(`Failed to restore snapshot for user ${userId}, creating new actor:`, error);
-          actor = createActor(botMachine);
-          actor.start();
+          logger.warn(`Failed to restore state for user ${userId}, using default:`, error);
         }
-      } else {
-        // Создаем новый актор
-        actor = createActor(botMachine);
-        actor.start();
       }
 
       // Сохраняем состояние при каждом изменении
@@ -64,18 +63,12 @@ export class StateService {
   private async saveState(userId: number, snapshot: any): Promise<void> {
     try {
       const stateKey = getStateKey(userId);
-      const snapshotKey = getStateSnapshotKey(userId);
+      const scene = snapshot.context.scene as Scene;
 
-      await Promise.all([
-        redis.set(stateKey, JSON.stringify(snapshot.value)),
-        redis.set(snapshotKey, JSON.stringify(snapshot)),
-      ]);
-
+      await redis.set(stateKey, JSON.stringify(scene));
+      
       // Устанавливаем TTL на 30 дней
-      await Promise.all([
-        redis.expire(stateKey, 60 * 60 * 24 * 30),
-        redis.expire(snapshotKey, 60 * 60 * 24 * 30),
-      ]);
+      await redis.expire(stateKey, 60 * 60 * 24 * 30);
     } catch (error) {
       logger.error(`Error saving state for user ${userId}:`, error);
     }

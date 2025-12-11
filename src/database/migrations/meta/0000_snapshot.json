@@ -1,9 +1,12 @@
 {
-  "version": "7",
+  "id": "69283d16-2039-499c-a8cd-beeaa931a771",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "6",
   "dialect": "postgresql",
   "tables": {
-    "users": {
+    "public.users": {
       "name": "users",
+      "schema": "",
       "columns": {
         "id": {
           "name": "id",
@@ -14,63 +17,71 @@
         "is_bot": {
           "name": "is_bot",
           "type": "boolean",
+          "primaryKey": false,
           "notNull": true
         },
         "first_name": {
           "name": "first_name",
           "type": "varchar(255)",
+          "primaryKey": false,
           "notNull": true
         },
         "last_name": {
           "name": "last_name",
-          "type": "varchar(255)"
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
         },
         "username": {
           "name": "username",
-          "type": "varchar(255)"
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
         },
         "language_code": {
           "name": "language_code",
-          "type": "varchar(10)"
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": false
         },
         "is_premium": {
           "name": "is_premium",
-          "type": "boolean"
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
         },
         "added_to_attachment_menu": {
           "name": "added_to_attachment_menu",
-          "type": "boolean"
-        },
-        "can_join_groups": {
-          "name": "can_join_groups",
-          "type": "boolean"
-        },
-        "can_read_all_group_messages": {
-          "name": "can_read_all_group_messages",
-          "type": "boolean"
-        },
-        "supports_inline_queries": {
-          "name": "supports_inline_queries",
-          "type": "boolean"
-        },
-        "raw_data": {
-          "name": "raw_data",
-          "type": "text"
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
-          "default": "now()",
-          "notNull": true
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
         },
         "updated_at": {
           "name": "updated_at",
           "type": "timestamp",
-          "default": "now()",
-          "notNull": true
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
         }
-      }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
     }
+  },
+  "enums": {},
+  "schemas": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
   }
 }
-

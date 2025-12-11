@@ -16,10 +16,6 @@ export class UserService {
         languageCode: telegramUser.language_code || null,
         isPremium: telegramUser.is_premium || null,
         addedToAttachmentMenu: telegramUser.added_to_attachment_menu || null,
-        canJoinGroups: telegramUser.can_join_groups || null,
-        canReadAllGroupMessages: telegramUser.can_read_all_group_messages || null,
-        supportsInlineQueries: telegramUser.supports_inline_queries || null,
-        rawData: JSON.stringify(telegramUser),
         updatedAt: new Date(),
       };
 
