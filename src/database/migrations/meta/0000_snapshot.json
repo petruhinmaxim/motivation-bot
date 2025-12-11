@@ -1,0 +1,76 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "users": {
+      "name": "users",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "is_bot": {
+          "name": "is_bot",
+          "type": "boolean",
+          "notNull": true
+        },
+        "first_name": {
+          "name": "first_name",
+          "type": "varchar(255)",
+          "notNull": true
+        },
+        "last_name": {
+          "name": "last_name",
+          "type": "varchar(255)"
+        },
+        "username": {
+          "name": "username",
+          "type": "varchar(255)"
+        },
+        "language_code": {
+          "name": "language_code",
+          "type": "varchar(10)"
+        },
+        "is_premium": {
+          "name": "is_premium",
+          "type": "boolean"
+        },
+        "added_to_attachment_menu": {
+          "name": "added_to_attachment_menu",
+          "type": "boolean"
+        },
+        "can_join_groups": {
+          "name": "can_join_groups",
+          "type": "boolean"
+        },
+        "can_read_all_group_messages": {
+          "name": "can_read_all_group_messages",
+          "type": "boolean"
+        },
+        "supports_inline_queries": {
+          "name": "supports_inline_queries",
+          "type": "boolean"
+        },
+        "raw_data": {
+          "name": "raw_data",
+          "type": "text"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "default": "now()",
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "default": "now()",
+          "notNull": true
+        }
+      }
+    }
+  }
+}
+
