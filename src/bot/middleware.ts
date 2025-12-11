@@ -19,23 +19,30 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
     // Сохраняем/обновляем пользователя в БД
     await userService.saveOrUpdateUser(ctx.from);
 
-    // Обрабатываем команды и кнопки
-    if (ctx.message?.text) {
-      const text = ctx.message.text;
+    // Обрабатываем команду /start
+    if (ctx.message?.text === '/start') {
+      await stateService.sendEvent(userId, { type: 'GO_TO_START' });
+      await handleStartScene(ctx);
+      return;
+    }
 
-      if (text === '/start' || text === '◀️ Назад') {
+    // Обрабатываем callback query (нажатия на inline кнопки)
+    if (ctx.callbackQuery?.data) {
+      const data = ctx.callbackQuery.data;
+
+      if (data === 'back') {
         await stateService.sendEvent(userId, { type: 'GO_TO_START' });
         await handleStartScene(ctx);
         return;
       }
 
-      if (text === 'ℹ️ Инфо') {
+      if (data === 'info') {
         await stateService.sendEvent(userId, { type: 'GO_TO_INFO' });
         await handleInfoScene(ctx);
         return;
       }
 
-      if (text === '🚀 Начать') {
+      if (data === 'begin') {
         await stateService.sendEvent(userId, { type: 'GO_TO_BEGIN' });
         await handleBeginScene(ctx);
         return;
