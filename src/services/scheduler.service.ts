@@ -2,11 +2,19 @@ import type { Api } from 'grammy';
 import { InlineKeyboard } from 'grammy';
 import { BUTTONS, MESSAGES } from '../scenes/messages.js';
 import logger from '../utils/logger.js';
+import redis from '../redis/client.js';
+import { getScheduledTaskDataKey, getScheduledTasksKey } from '../redis/keys.js';
 
 interface ScheduledTask {
   userId: number;
   timeoutId: NodeJS.Timeout;
   scheduledTime: Date;
+}
+
+interface SavedTask {
+  userId: number;
+  scheduledTime: string; // ISO string
+  type: 'tomorrow' | 'monday';
 }
 
 class SchedulerService {
@@ -18,6 +26,100 @@ class SchedulerService {
    */
   setBotApi(api: Api): void {
     this.botApi = api;
+  }
+
+  /**
+   * Восстанавливает все запланированные задачи из Redis при старте
+   */
+  async restoreTasks(): Promise<void> {
+    try {
+      const tasksJson = await redis.get(getScheduledTasksKey());
+      if (!tasksJson) {
+        logger.info('No scheduled tasks to restore');
+        return;
+      }
+
+      const savedTasks: SavedTask[] = JSON.parse(tasksJson);
+      const now = new Date();
+      let restoredCount = 0;
+
+      for (const task of savedTasks) {
+        const scheduledTime = new Date(task.scheduledTime);
+        
+        // Пропускаем задачи, которые уже должны были выполниться
+        if (scheduledTime <= now) {
+          logger.warn(`Skipping expired task for user ${task.userId}`);
+          await this.removeTaskFromRedis(task.userId);
+          continue;
+        }
+
+        // Восстанавливаем задачу
+        if (task.type === 'tomorrow') {
+          this.scheduleTomorrowDuration(task.userId);
+        } else if (task.type === 'monday') {
+          this.scheduleMondayDuration(task.userId);
+        }
+        restoredCount++;
+      }
+
+      logger.info(`Restored ${restoredCount} scheduled tasks from Redis`);
+    } catch (error) {
+      logger.error('Error restoring tasks from Redis:', error);
+    }
+  }
+
+  /**
+   * Сохраняет задачу в Redis
+   */
+  private async saveTaskToRedis(userId: number, scheduledTime: Date, type: 'tomorrow' | 'monday'): Promise<void> {
+    try {
+      const taskData: SavedTask = {
+        userId,
+        scheduledTime: scheduledTime.toISOString(),
+        type,
+      };
+
+      // Сохраняем данные задачи
+      const ttlSeconds = Math.ceil((scheduledTime.getTime() - Date.now()) / 1000) + 3600; // TTL = время до выполнения + 1 час
+      await redis.set(
+        getScheduledTaskDataKey(userId),
+        JSON.stringify(taskData),
+        'EX',
+        ttlSeconds > 0 ? ttlSeconds : 3600
+      );
+
+      // Добавляем в список всех задач
+      const tasksKey = getScheduledTasksKey();
+      const existingTasksJson = await redis.get(tasksKey);
+      const existingTasks: SavedTask[] = existingTasksJson ? JSON.parse(existingTasksJson) : [];
+      
+      // Удаляем старую задачу для этого пользователя, если есть
+      const filteredTasks = existingTasks.filter(t => t.userId !== userId);
+      filteredTasks.push(taskData);
+
+      await redis.set(tasksKey, JSON.stringify(filteredTasks));
+    } catch (error) {
+      logger.error(`Error saving task to Redis for user ${userId}:`, error);
+    }
+  }
+
+  /**
+   * Удаляет задачу из Redis
+   */
+  private async removeTaskFromRedis(userId: number): Promise<void> {
+    try {
+      await redis.del(getScheduledTaskDataKey(userId));
+
+      const tasksKey = getScheduledTasksKey();
+      const existingTasksJson = await redis.get(tasksKey);
+      if (existingTasksJson) {
+        const existingTasks: SavedTask[] = JSON.parse(existingTasksJson);
+        const filteredTasks = existingTasks.filter(t => t.userId !== userId);
+        await redis.set(tasksKey, JSON.stringify(filteredTasks));
+      }
+    } catch (error) {
+      logger.error(`Error removing task from Redis for user ${userId}:`, error);
+    }
   }
 
   /**
@@ -46,10 +148,12 @@ class SchedulerService {
       try {
         await callback();
         this.tasks.delete(userId);
+        await this.removeTaskFromRedis(userId);
         logger.info(`Scheduled task completed for user ${userId}`);
       } catch (error) {
         logger.error(`Error in scheduled task for user ${userId}:`, error);
         this.tasks.delete(userId);
+        await this.removeTaskFromRedis(userId);
       }
     }, delay);
 
@@ -68,6 +172,7 @@ class SchedulerService {
     if (task) {
       clearTimeout(task.timeoutId);
       this.tasks.delete(userId);
+      this.removeTaskFromRedis(userId);
       logger.info(`Cancelled scheduled task for user ${userId}`);
     }
   }
@@ -166,6 +271,9 @@ class SchedulerService {
         logger.error(`Error sending scheduled duration scene to user ${userId}:`, error);
       }
     });
+
+    // Сохраняем в Redis
+    this.saveTaskToRedis(userId, scheduledTime, 'tomorrow');
   }
 
   /**
@@ -195,6 +303,9 @@ class SchedulerService {
         logger.error(`Error sending scheduled duration scene to user ${userId}:`, error);
       }
     });
+
+    // Сохраняем в Redis
+    this.saveTaskToRedis(userId, scheduledTime, 'monday');
   }
 }
 
