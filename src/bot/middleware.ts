@@ -6,8 +6,12 @@ import {
   handleStartScene,
   handleInfoScene,
   handleBeginScene,
+  handleDurationScene,
+  handleTomorrowScene,
+  handleMondayScene,
 } from '../scenes/index.js';
 import { MESSAGES } from '../scenes/messages.js';
+import { schedulerService } from '../services/scheduler.service.js';
 
 export async function stateMiddleware(ctx: Context, next: NextFunction) {
   if (!ctx.from) {
@@ -44,6 +48,52 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       }
 
       if (data === 'begin') {
+        await stateService.sendEvent(userId, { type: 'GO_TO_BEGIN' });
+        await handleBeginScene(ctx);
+        return;
+      }
+
+      if (data === 'start_today') {
+        await handleDurationScene(ctx);
+        return;
+      }
+
+      if (data === 'start_tomorrow') {
+        await handleTomorrowScene(ctx);
+        schedulerService.scheduleTomorrowDuration(userId);
+        return;
+      }
+
+      if (data === 'start_monday') {
+        await handleMondayScene(ctx);
+        schedulerService.scheduleMondayDuration(userId);
+        return;
+      }
+
+      if (data === 'start_now_tomorrow') {
+        // Отменяем запланированное напоминание
+        schedulerService.cancelTask(userId);
+        // Открываем сцену выбора продолжительности
+        await handleDurationScene(ctx);
+        return;
+      }
+
+      if (data === 'start_now_monday') {
+        // Отменяем запланированное напоминание
+        schedulerService.cancelTask(userId);
+        // Открываем сцену выбора продолжительности
+        await handleDurationScene(ctx);
+        return;
+      }
+
+      if (data === 'duration_30' || data === 'duration_60' || data === 'duration_90') {
+        // Заглушка для выбора продолжительности
+        await ctx.answerCallbackQuery({ text: 'Функционал в разработке' });
+        return;
+      }
+
+      if (data === 'postpone_start') {
+        // Возвращаемся на сцену выбора старта челленджа
         await stateService.sendEvent(userId, { type: 'GO_TO_BEGIN' });
         await handleBeginScene(ctx);
         return;
