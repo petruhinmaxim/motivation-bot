@@ -7,6 +7,7 @@ import {
   handleInfoScene,
   handleBeginScene,
 } from '../scenes/index.js';
+import { MESSAGES } from '../scenes/messages.js';
 
 export async function stateMiddleware(ctx: Context, next: NextFunction) {
   if (!ctx.from) {
@@ -53,7 +54,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
     return next();
   } catch (error) {
     logger.error(`Error in state middleware for user ${userId}:`, error);
-    await ctx.reply('Произошла ошибка. Попробуйте позже.');
+    await ctx.reply(MESSAGES.ERROR.TEXT);
   }
 
   return next();

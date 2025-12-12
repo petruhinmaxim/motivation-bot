@@ -1,18 +1,12 @@
 import { InlineKeyboard } from 'grammy';
 import type { Context } from 'grammy';
+import { BUTTONS, MESSAGES } from './messages.js';
 
 export const infoKeyboard = new InlineKeyboard()
-  .text('◀️ Назад', 'back');
+  .text(BUTTONS.BACK, 'back');
 
 export async function handleInfoScene(ctx: Context) {
-  const messageText =
-    `ℹ️ Информация о боте\n\n` +
-    `Этот бот создан для мотивации и поддержки на пути к достижению целей.\n\n` +
-    `Здесь ты сможешь:\n` +
-    `• Получать ежедневные мотивационные сообщения\n` +
-    `• Отслеживать свой прогресс\n` +
-    `• Ставить и достигать цели\n\n` +
-    `Мы верим в тебя! 💪`;
+  const messageText = MESSAGES.INFO.TEXT;
 
   // Если это callback query (нажатие на кнопку), редактируем сообщение
   if (ctx.callbackQuery) {
