@@ -4,4 +4,5 @@ export * from './begin.scene.js';
 export * from './duration.scene.js';
 export * from './tomorrow.scene.js';
 export * from './monday.scene.js';
+export * from './reminder.scene.js';
 

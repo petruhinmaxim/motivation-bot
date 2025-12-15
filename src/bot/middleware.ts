@@ -1,6 +1,7 @@
 import type { Context, NextFunction } from 'grammy';
 import { stateService } from '../services/state.service.js';
 import { userService } from '../services/user.service.js';
+import { challengeService } from '../services/challenge.service.js';
 import logger from '../utils/logger.js';
 import {
   handleStartScene,
@@ -9,6 +10,7 @@ import {
   handleDurationScene,
   handleTomorrowScene,
   handleMondayScene,
+  handleReminderScene,
 } from '../scenes/index.js';
 import { MESSAGES } from '../scenes/messages.js';
 import { schedulerService } from '../services/scheduler.service.js';
@@ -87,8 +89,14 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       }
 
       if (data === 'duration_30' || data === 'duration_60' || data === 'duration_90') {
-        // Заглушка для выбора продолжительности
-        await ctx.answerCallbackQuery({ text: 'Функционал в разработке' });
+        // Определяем продолжительность челленджа
+        const duration = data === 'duration_30' ? 30 : data === 'duration_60' ? 60 : 90;
+        
+        // Создаем или обновляем челлендж
+        await challengeService.createOrUpdateChallenge(userId, duration);
+        
+        // Переходим к сцене запроса напоминаний
+        await handleReminderScene(ctx);
         return;
       }
 
