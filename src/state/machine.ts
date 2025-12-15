@@ -8,6 +8,10 @@ export const botMachine = setup({
       | { type: 'GO_TO_START' }
       | { type: 'GO_TO_INFO' }
       | { type: 'GO_TO_BEGIN' }
+      | { type: 'GO_TO_DURATION' }
+      | { type: 'GO_TO_TOMORROW' }
+      | { type: 'GO_TO_MONDAY' }
+      | { type: 'GO_TO_TIMEZONE' }
       | { type: 'GO_BACK' },
   },
 }).createMachine({
@@ -38,6 +42,9 @@ export const botMachine = setup({
         GO_BACK: {
           target: 'start',
         },
+        GO_TO_START: {
+          target: 'start',
+        },
       },
     },
     begin: {
@@ -45,7 +52,86 @@ export const botMachine = setup({
         context.scene = 'begin';
       },
       on: {
+        GO_TO_DURATION: {
+          target: 'duration',
+        },
+        GO_TO_TOMORROW: {
+          target: 'tomorrow',
+        },
+        GO_TO_MONDAY: {
+          target: 'monday',
+        },
         GO_BACK: {
+          target: 'start',
+        },
+        GO_TO_START: {
+          target: 'start',
+        },
+      },
+    },
+    duration: {
+      entry: ({ context }) => {
+        context.scene = 'duration';
+      },
+      on: {
+        GO_TO_TIMEZONE: {
+          target: 'timezone',
+        },
+        GO_BACK: {
+          target: 'begin',
+        },
+        GO_TO_START: {
+          target: 'start',
+        },
+      },
+    },
+    tomorrow: {
+      entry: ({ context }) => {
+        context.scene = 'tomorrow';
+      },
+      on: {
+        GO_TO_TIMEZONE: {
+          target: 'timezone',
+        },
+        GO_TO_DURATION: {
+          target: 'duration',
+        },
+        GO_BACK: {
+          target: 'begin',
+        },
+        GO_TO_START: {
+          target: 'start',
+        },
+      },
+    },
+    monday: {
+      entry: ({ context }) => {
+        context.scene = 'monday';
+      },
+      on: {
+        GO_TO_TIMEZONE: {
+          target: 'timezone',
+        },
+        GO_TO_DURATION: {
+          target: 'duration',
+        },
+        GO_BACK: {
+          target: 'begin',
+        },
+        GO_TO_START: {
+          target: 'start',
+        },
+      },
+    },
+    timezone: {
+      entry: ({ context }) => {
+        context.scene = 'timezone';
+      },
+      on: {
+        GO_BACK: {
+          target: 'begin',
+        },
+        GO_TO_START: {
           target: 'start',
         },
       },

@@ -57,17 +57,20 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       }
 
       if (data === 'start_today') {
+        await stateService.sendEvent(userId, { type: 'GO_TO_DURATION' });
         await handleDurationScene(ctx);
         return;
       }
 
       if (data === 'start_tomorrow') {
+        await stateService.sendEvent(userId, { type: 'GO_TO_TOMORROW' });
         await handleTomorrowScene(ctx);
         schedulerService.scheduleTomorrowDuration(userId);
         return;
       }
 
       if (data === 'start_monday') {
+        await stateService.sendEvent(userId, { type: 'GO_TO_MONDAY' });
         await handleMondayScene(ctx);
         schedulerService.scheduleMondayDuration(userId);
         return;
@@ -77,6 +80,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         // Отменяем запланированное напоминание
         schedulerService.cancelTask(userId);
         // Открываем сцену выбора продолжительности
+        await stateService.sendEvent(userId, { type: 'GO_TO_DURATION' });
         await handleDurationScene(ctx);
         return;
       }
@@ -85,6 +89,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         // Отменяем запланированное напоминание
         schedulerService.cancelTask(userId);
         // Открываем сцену выбора продолжительности
+        await stateService.sendEvent(userId, { type: 'GO_TO_DURATION' });
         await handleDurationScene(ctx);
         return;
       }
@@ -97,6 +102,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         await challengeService.createOrUpdateChallenge(userId, duration);
         
         // Переходим к сцене выбора часового пояса
+        await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
         await handleTimezoneScene(ctx);
         return;
       }
@@ -109,19 +115,20 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       }
     }
 
-    // Обрабатываем текстовые сообщения в сцене выбора часового пояса
+    // Обрабатываем текстовые сообщения в зависимости от текущей сцены
     if (ctx.message?.text && ctx.message.text !== '/start') {
-      const user = await userService.getUser(userId);
-      const challenge = await challengeService.getActiveChallenge(userId);
+      const currentScene = await stateService.getCurrentScene(userId);
 
-      // Если у пользователя есть активный челлендж, но нет timezone, значит он в сцене выбора timezone
-      if (challenge && user && user.timezone === null) {
+      // Обрабатываем timezone только если пользователь в сцене timezone
+      if (currentScene === 'timezone') {
         const timezone = parseTimezone(ctx.message.text);
         
         if (timezone !== null) {
           // Сохраняем timezone
           await userService.updateTimezone(userId, timezone);
           await ctx.reply(`Отлично! Твой часовой пояс сохранен: UTC${timezone >= 0 ? '+' : ''}${timezone}`);
+          // Переходим обратно на стартовую сцену после сохранения timezone
+          await stateService.sendEvent(userId, { type: 'GO_TO_START' });
           return;
         } else {
           // Не удалось распарсить, просим повторить

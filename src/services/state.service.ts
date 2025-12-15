@@ -33,6 +33,19 @@ export class StateService {
             actor.send({ type: 'GO_TO_INFO' });
           } else if (savedState === 'begin') {
             actor.send({ type: 'GO_TO_BEGIN' });
+          } else if (savedState === 'duration') {
+            actor.send({ type: 'GO_TO_BEGIN' });
+            actor.send({ type: 'GO_TO_DURATION' });
+          } else if (savedState === 'tomorrow') {
+            actor.send({ type: 'GO_TO_BEGIN' });
+            actor.send({ type: 'GO_TO_TOMORROW' });
+          } else if (savedState === 'monday') {
+            actor.send({ type: 'GO_TO_BEGIN' });
+            actor.send({ type: 'GO_TO_MONDAY' });
+          } else if (savedState === 'timezone') {
+            actor.send({ type: 'GO_TO_BEGIN' });
+            actor.send({ type: 'GO_TO_DURATION' });
+            actor.send({ type: 'GO_TO_TIMEZONE' });
           } else {
             actor.send({ type: 'GO_TO_START' });
           }
