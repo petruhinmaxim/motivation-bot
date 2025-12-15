@@ -46,6 +46,17 @@ export class StateService {
             actor.send({ type: 'GO_TO_BEGIN' });
             actor.send({ type: 'GO_TO_DURATION' });
             actor.send({ type: 'GO_TO_TIMEZONE' });
+          } else if (savedState === 'reminder_time') {
+            actor.send({ type: 'GO_TO_BEGIN' });
+            actor.send({ type: 'GO_TO_DURATION' });
+            actor.send({ type: 'GO_TO_TIMEZONE' });
+            actor.send({ type: 'GO_TO_REMINDER_TIME' });
+          } else if (savedState === 'challenge_rules') {
+            actor.send({ type: 'GO_TO_BEGIN' });
+            actor.send({ type: 'GO_TO_DURATION' });
+            actor.send({ type: 'GO_TO_TIMEZONE' });
+            actor.send({ type: 'GO_TO_REMINDER_TIME' });
+            actor.send({ type: 'GO_TO_CHALLENGE_RULES' });
           } else {
             actor.send({ type: 'GO_TO_START' });
           }

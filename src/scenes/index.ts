@@ -5,4 +5,6 @@ export * from './duration.scene.js';
 export * from './tomorrow.scene.js';
 export * from './monday.scene.js';
 export * from './timezone.scene.js';
+export * from './reminder-time.scene.js';
+export * from './challenge-rules.scene.js';
 

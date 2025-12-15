@@ -65,6 +65,26 @@ export class ChallengeService {
 
     return result[0] || null;
   }
+
+  /**
+   * Обновляет время напоминаний и статус напоминаний для активного челленджа
+   */
+  async updateReminderTime(userId: number, reminderTime: string): Promise<void> {
+    try {
+      await db
+        .update(challenges)
+        .set({
+          reminderTime,
+          reminderStatus: true,
+          updatedAt: new Date(),
+        })
+        .where(eq(challenges.userId, userId));
+      logger.info(`Updated reminder time for user ${userId}: ${reminderTime}`);
+    } catch (error) {
+      logger.error(`Error updating reminder time for user ${userId}:`, error);
+      throw error;
+    }
+  }
 }
 
 export const challengeService = new ChallengeService();

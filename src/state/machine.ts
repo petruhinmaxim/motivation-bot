@@ -12,6 +12,8 @@ export const botMachine = setup({
       | { type: 'GO_TO_TOMORROW' }
       | { type: 'GO_TO_MONDAY' }
       | { type: 'GO_TO_TIMEZONE' }
+      | { type: 'GO_TO_REMINDER_TIME' }
+      | { type: 'GO_TO_CHALLENGE_RULES' }
       | { type: 'GO_BACK' },
   },
 }).createMachine({
@@ -128,8 +130,40 @@ export const botMachine = setup({
         context.scene = 'timezone';
       },
       on: {
+        GO_TO_REMINDER_TIME: {
+          target: 'reminder_time',
+        },
         GO_BACK: {
           target: 'begin',
+        },
+        GO_TO_START: {
+          target: 'start',
+        },
+      },
+    },
+    reminder_time: {
+      entry: ({ context }) => {
+        context.scene = 'reminder_time';
+      },
+      on: {
+        GO_TO_CHALLENGE_RULES: {
+          target: 'challenge_rules',
+        },
+        GO_BACK: {
+          target: 'timezone',
+        },
+        GO_TO_START: {
+          target: 'start',
+        },
+      },
+    },
+    challenge_rules: {
+      entry: ({ context }) => {
+        context.scene = 'challenge_rules';
+      },
+      on: {
+        GO_BACK: {
+          target: 'reminder_time',
         },
         GO_TO_START: {
           target: 'start',

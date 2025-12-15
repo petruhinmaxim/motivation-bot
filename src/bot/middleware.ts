@@ -12,9 +12,12 @@ import {
   handleTomorrowScene,
   handleMondayScene,
   handleTimezoneScene,
+  handleReminderTimeScene,
+  handleChallengeRulesScene,
 } from '../scenes/index.js';
 import { MESSAGES } from '../scenes/messages.js';
 import { schedulerService } from '../services/scheduler.service.js';
+import { validateTime } from '../utils/time-validator.js';
 
 export async function stateMiddleware(ctx: Context, next: NextFunction) {
   if (!ctx.from) {
@@ -126,13 +129,31 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         if (timezone !== null) {
           // Сохраняем timezone
           await userService.updateTimezone(userId, timezone);
-          await ctx.reply(`Отлично! Твой часовой пояс сохранен: UTC${timezone >= 0 ? '+' : ''}${timezone}`);
-          // Переходим обратно на стартовую сцену после сохранения timezone
-          await stateService.sendEvent(userId, { type: 'GO_TO_START' });
+          // Переходим к сцене выбора времени напоминаний
+          await stateService.sendEvent(userId, { type: 'GO_TO_REMINDER_TIME' });
+          await handleReminderTimeScene(ctx);
           return;
         } else {
           // Не удалось распарсить, просим повторить
           await ctx.reply('Не удалось распознать часовой пояс. Пожалуйста, отправь сообщение в формате "X МСК", например: "0 МСК" или "+2 МСК"');
+          return;
+        }
+      }
+
+      // Обрабатываем время напоминаний только если пользователь в сцене reminder_time
+      if (currentScene === 'reminder_time') {
+        const validation = validateTime(ctx.message.text);
+        
+        if (validation.isValid && validation.time) {
+          // Сохраняем время напоминаний
+          await challengeService.updateReminderTime(userId, validation.time);
+          // Переходим к сцене правил челленджа
+          await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_RULES' });
+          await handleChallengeRulesScene(ctx);
+          return;
+        } else {
+          // Не удалось распарсить, просим повторить
+          await ctx.reply('Не удалось распознать время. Пожалуйста, отправь время в формате "HH:MM", например: "14:00" или "09:30"');
           return;
         }
       }
