@@ -23,8 +23,7 @@ export async function handleStartScene(ctx: Context) {
     keyboard = new InlineKeyboard()
       .text('К челленджу', 'challenge_stats')
       .row()
-      .text(BUTTONS.INFO, 'info')
-      .text(BUTTONS.BEGIN, 'begin');
+      .text(BUTTONS.INFO, 'info');
   }
 
   // Если это callback query (нажатие на кнопку), редактируем сообщение
