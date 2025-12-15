@@ -10,7 +10,7 @@ import {
   handleDurationScene,
   handleTomorrowScene,
   handleMondayScene,
-  handleReminderScene,
+  handleTimezoneScene,
 } from '../scenes/index.js';
 import { MESSAGES } from '../scenes/messages.js';
 import { schedulerService } from '../services/scheduler.service.js';
@@ -95,8 +95,8 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         // Создаем или обновляем челлендж
         await challengeService.createOrUpdateChallenge(userId, duration);
         
-        // Переходим к сцене запроса напоминаний
-        await handleReminderScene(ctx);
+        // Переходим к сцене выбора часового пояса
+        await handleTimezoneScene(ctx);
         return;
       }
 

@@ -1,8 +1,8 @@
 import type { Context } from 'grammy';
 import { MESSAGES } from './messages.js';
 
-export async function handleReminderScene(ctx: Context) {
-  const messageText = MESSAGES.REMINDER.TEXT;
+export async function handleTimezoneScene(ctx: Context) {
+  const messageText = MESSAGES.TIMEZONE.TEXT;
 
   // Если это callback query (нажатие на кнопку), редактируем сообщение
   if (ctx.callbackQuery) {
