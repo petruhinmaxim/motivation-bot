@@ -53,6 +53,22 @@ export class UserService {
 
     return result[0] || null;
   }
+
+  async updateTimezone(userId: number, timezone: number): Promise<void> {
+    try {
+      await db
+        .update(users)
+        .set({
+          timezone,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, userId));
+      logger.info(`Updated timezone for user ${userId}: UTC${timezone >= 0 ? '+' : ''}${timezone}`);
+    } catch (error) {
+      logger.error(`Error updating timezone for user ${userId}:`, error);
+      throw error;
+    }
+  }
 }
 
 export const userService = new UserService();

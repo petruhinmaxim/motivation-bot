@@ -10,6 +10,7 @@ export const users = pgTable('users', {
   languageCode: varchar('language_code', { length: 10 }),
   isPremium: boolean('is_premium'),
   addedToAttachmentMenu: boolean('added_to_attachment_menu'),
+  timezone: integer('timezone'), // Смещение от UTC в часах
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

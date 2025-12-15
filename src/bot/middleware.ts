@@ -2,6 +2,7 @@ import type { Context, NextFunction } from 'grammy';
 import { stateService } from '../services/state.service.js';
 import { userService } from '../services/user.service.js';
 import { challengeService } from '../services/challenge.service.js';
+import { parseTimezone } from '../utils/timezone-parser.js';
 import logger from '../utils/logger.js';
 import {
   handleStartScene,
@@ -105,6 +106,28 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         await stateService.sendEvent(userId, { type: 'GO_TO_BEGIN' });
         await handleBeginScene(ctx);
         return;
+      }
+    }
+
+    // Обрабатываем текстовые сообщения в сцене выбора часового пояса
+    if (ctx.message?.text && ctx.message.text !== '/start') {
+      const user = await userService.getUser(userId);
+      const challenge = await challengeService.getActiveChallenge(userId);
+
+      // Если у пользователя есть активный челлендж, но нет timezone, значит он в сцене выбора timezone
+      if (challenge && user && user.timezone === null) {
+        const timezone = parseTimezone(ctx.message.text);
+        
+        if (timezone !== null) {
+          // Сохраняем timezone
+          await userService.updateTimezone(userId, timezone);
+          await ctx.reply(`Отлично! Твой часовой пояс сохранен: UTC${timezone >= 0 ? '+' : ''}${timezone}`);
+          return;
+        } else {
+          // Не удалось распарсить, просим повторить
+          await ctx.reply('Не удалось распознать часовой пояс. Пожалуйста, отправь сообщение в формате "X МСК", например: "0 МСК" или "+2 МСК"');
+          return;
+        }
       }
     }
 
