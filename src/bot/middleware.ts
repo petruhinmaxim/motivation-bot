@@ -15,6 +15,9 @@ import {
   handleReminderTimeScene,
   handleChallengeRulesScene,
   handleChallengeStatsScene,
+  handleChallengeSettingsScene,
+  handleEditTimezoneScene,
+  handleEditReminderTimeScene,
 } from '../scenes/index.js';
 import { MESSAGES } from '../scenes/messages.js';
 import { schedulerService } from '../services/scheduler.service.js';
@@ -131,6 +134,27 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         await handleChallengeRulesScene(ctx);
         return;
       }
+
+      if (data === 'challenge_settings') {
+        // Переходим к сцене настроек челленджа
+        await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_SETTINGS' });
+        await handleChallengeSettingsScene(ctx);
+        return;
+      }
+
+      if (data === 'change_timezone') {
+        // Переходим к сцене редактирования часового пояса
+        await stateService.sendEvent(userId, { type: 'GO_TO_EDIT_TIMEZONE' });
+        await handleEditTimezoneScene(ctx);
+        return;
+      }
+
+      if (data === 'change_reminder_time') {
+        // Переходим к сцене редактирования времени уведомлений
+        await stateService.sendEvent(userId, { type: 'GO_TO_EDIT_REMINDER_TIME' });
+        await handleEditReminderTimeScene(ctx);
+        return;
+      }
     }
 
     // Обрабатываем текстовые сообщения в зависимости от текущей сцены
@@ -155,6 +179,26 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         }
       }
 
+      // Обрабатываем редактирование timezone из настроек
+      if (currentScene === 'edit_timezone') {
+        const timezone = parseTimezone(ctx.message.text);
+        
+        if (timezone !== null) {
+          // Сохраняем timezone
+          await userService.updateTimezone(userId, timezone);
+          // Отправляем уведомление об успехе
+          await ctx.reply('✅ Часовой пояс успешно изменен!');
+          // Возвращаемся в настройки
+          await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_SETTINGS' });
+          await handleChallengeSettingsScene(ctx);
+          return;
+        } else {
+          // Не удалось распарсить, просим повторить
+          await ctx.reply('❌ Не удалось распознать часовой пояс. Пожалуйста, отправь сообщение в формате "X МСК", например: "0 МСК" или "+2 МСК"');
+          return;
+        }
+      }
+
       // Обрабатываем время напоминаний только если пользователь в сцене reminder_time
       if (currentScene === 'reminder_time') {
         const validation = validateTime(ctx.message.text);
@@ -169,6 +213,26 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         } else {
           // Не удалось распарсить, просим повторить
           await ctx.reply('Не удалось распознать время. Пожалуйста, отправь время в формате "HH:MM", например: "14:00" или "09:30"');
+          return;
+        }
+      }
+
+      // Обрабатываем редактирование времени напоминаний из настроек
+      if (currentScene === 'edit_reminder_time') {
+        const validation = validateTime(ctx.message.text);
+        
+        if (validation.isValid && validation.time) {
+          // Сохраняем время напоминаний
+          await challengeService.updateReminderTime(userId, validation.time);
+          // Отправляем уведомление об успехе
+          await ctx.reply('✅ Время уведомлений успешно изменено!');
+          // Возвращаемся в настройки
+          await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_SETTINGS' });
+          await handleChallengeSettingsScene(ctx);
+          return;
+        } else {
+          // Не удалось распарсить, просим повторить
+          await ctx.reply('❌ Не удалось распознать время. Пожалуйста, отправь время в формате "HH:MM", например: "14:00" или "09:30"');
           return;
         }
       }

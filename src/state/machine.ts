@@ -15,6 +15,9 @@ export const botMachine = setup({
       | { type: 'GO_TO_REMINDER_TIME' }
       | { type: 'GO_TO_CHALLENGE_RULES' }
       | { type: 'GO_TO_CHALLENGE_STATS' }
+      | { type: 'GO_TO_CHALLENGE_SETTINGS' }
+      | { type: 'GO_TO_EDIT_TIMEZONE' }
+      | { type: 'GO_TO_EDIT_REMINDER_TIME' }
       | { type: 'GO_BACK' },
   },
 }).createMachine({
@@ -182,8 +185,65 @@ export const botMachine = setup({
         GO_TO_CHALLENGE_RULES: {
           target: 'challenge_rules',
         },
+        GO_TO_CHALLENGE_SETTINGS: {
+          target: 'challenge_settings',
+        },
         GO_BACK: {
           target: 'challenge_rules',
+        },
+        GO_TO_START: {
+          target: 'start',
+        },
+      },
+    },
+    challenge_settings: {
+      entry: ({ context }) => {
+        context.scene = 'challenge_settings';
+      },
+      on: {
+        GO_TO_CHALLENGE_STATS: {
+          target: 'challenge_stats',
+        },
+        GO_TO_EDIT_TIMEZONE: {
+          target: 'edit_timezone',
+        },
+        GO_TO_EDIT_REMINDER_TIME: {
+          target: 'edit_reminder_time',
+        },
+        GO_BACK: {
+          target: 'challenge_stats',
+        },
+        GO_TO_START: {
+          target: 'start',
+        },
+      },
+    },
+    edit_timezone: {
+      entry: ({ context }) => {
+        context.scene = 'edit_timezone';
+      },
+      on: {
+        GO_TO_CHALLENGE_SETTINGS: {
+          target: 'challenge_settings',
+        },
+        GO_BACK: {
+          target: 'challenge_settings',
+        },
+        GO_TO_START: {
+          target: 'start',
+        },
+      },
+    },
+    edit_reminder_time: {
+      entry: ({ context }) => {
+        context.scene = 'edit_reminder_time';
+      },
+      on: {
+        GO_TO_CHALLENGE_SETTINGS: {
+          target: 'challenge_settings',
+        },
+        GO_BACK: {
+          target: 'challenge_settings',
         },
         GO_TO_START: {
           target: 'start',

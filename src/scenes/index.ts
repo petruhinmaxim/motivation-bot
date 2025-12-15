@@ -8,4 +8,7 @@ export * from './timezone.scene.js';
 export * from './reminder-time.scene.js';
 export * from './challenge-rules.scene.js';
 export * from './challenge-stats.scene.js';
+export * from './challenge-settings.scene.js';
+export * from './edit-timezone.scene.js';
+export * from './edit-reminder-time.scene.js';
 
