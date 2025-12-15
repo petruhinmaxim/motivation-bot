@@ -10,7 +10,7 @@ export async function handleChallengeSettingsScene(ctx: Context) {
     .row()
     .text('Изменить время уведомлений', 'change_reminder_time')
     .row()
-    .text('Назад', 'challenge_stats');
+    .text('К челленджу', 'challenge_stats');
 
   // Если это callback query (нажатие на кнопку), редактируем сообщение
   if (ctx.callbackQuery) {
