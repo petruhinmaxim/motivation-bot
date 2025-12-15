@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS "users" (
 	"language_code" varchar(10),
 	"is_premium" boolean,
 	"added_to_attachment_menu" boolean,
+	"timezone" integer,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );

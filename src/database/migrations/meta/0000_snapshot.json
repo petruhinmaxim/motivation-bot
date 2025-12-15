@@ -1,5 +1,5 @@
 {
-  "id": "06a263b9-d9fa-4acb-8c45-dce73fa14a90",
+  "id": "042f7b71-19a7-4405-8a44-4958028c270f",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "6",
   "dialect": "postgresql",
@@ -156,6 +156,12 @@
         "added_to_attachment_menu": {
           "name": "added_to_attachment_menu",
           "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "timezone": {
+          "name": "timezone",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
