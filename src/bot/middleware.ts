@@ -14,6 +14,7 @@ import {
   handleTimezoneScene,
   handleReminderTimeScene,
   handleChallengeRulesScene,
+  handleChallengeStatsScene,
 } from '../scenes/index.js';
 import { MESSAGES } from '../scenes/messages.js';
 import { schedulerService } from '../services/scheduler.service.js';
@@ -114,6 +115,20 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         // Возвращаемся на сцену выбора старта челленджа
         await stateService.sendEvent(userId, { type: 'GO_TO_BEGIN' });
         await handleBeginScene(ctx);
+        return;
+      }
+
+      if (data === 'challenge_stats') {
+        // Переходим к сцене статистики челленджа
+        await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
+        await handleChallengeStatsScene(ctx);
+        return;
+      }
+
+      if (data === 'challenge_rules') {
+        // Переходим к сцене правил челленджа
+        await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_RULES' });
+        await handleChallengeRulesScene(ctx);
         return;
       }
     }

@@ -57,6 +57,13 @@ export class StateService {
             actor.send({ type: 'GO_TO_TIMEZONE' });
             actor.send({ type: 'GO_TO_REMINDER_TIME' });
             actor.send({ type: 'GO_TO_CHALLENGE_RULES' });
+          } else if (savedState === 'challenge_stats') {
+            actor.send({ type: 'GO_TO_BEGIN' });
+            actor.send({ type: 'GO_TO_DURATION' });
+            actor.send({ type: 'GO_TO_TIMEZONE' });
+            actor.send({ type: 'GO_TO_REMINDER_TIME' });
+            actor.send({ type: 'GO_TO_CHALLENGE_RULES' });
+            actor.send({ type: 'GO_TO_CHALLENGE_STATS' });
           } else {
             actor.send({ type: 'GO_TO_START' });
           }

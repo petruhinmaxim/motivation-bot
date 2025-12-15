@@ -7,4 +7,5 @@ export * from './monday.scene.js';
 export * from './timezone.scene.js';
 export * from './reminder-time.scene.js';
 export * from './challenge-rules.scene.js';
+export * from './challenge-stats.scene.js';
 
