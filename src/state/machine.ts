@@ -38,6 +38,9 @@ export const botMachine = setup({
         GO_TO_BEGIN: {
           target: 'begin',
         },
+        GO_TO_CHALLENGE_STATS: {
+          target: 'challenge_stats',
+        },
       },
     },
     info: {
