@@ -1,6 +1,4 @@
 import type { Api } from 'grammy';
-import { InlineKeyboard } from 'grammy';
-import { BUTTONS, MESSAGES } from '../scenes/messages.js';
 import logger from '../utils/logger.js';
 import redis from '../redis/client.js';
 import { 
@@ -11,8 +9,8 @@ import {
 } from '../redis/keys.js';
 import { getRandomReminderPhrase } from '../utils/motivational-phrases.js';
 import { handleChallengeStatsScene } from '../scenes/challenge-stats.scene.js';
+import { handleChallengeStartNotificationScene } from '../scenes/challenge-start-notification.scene.js';
 import { challengeService } from './challenge.service.js';
-import { userService } from './user.service.js';
 
 interface ScheduledTask {
   userId: number;
@@ -519,7 +517,7 @@ class SchedulerService {
   }
 
   /**
-   * Планирует отправку сцены выбора продолжительности завтра в 12:00 МСК
+   * Планирует отправку сцены уведомления о старте челленджа завтра в 12:00 МСК
    */
   scheduleTomorrowDuration(userId: number): void {
     const scheduledTime = this.getTomorrow12MSK();
@@ -531,18 +529,27 @@ class SchedulerService {
       }
 
       try {
-        const durationKeyboard = new InlineKeyboard()
-          .text(BUTTONS.DURATION_30, 'duration_30')
-          .text(BUTTONS.DURATION_60, 'duration_60')
-          .text(BUTTONS.DURATION_90, 'duration_90')
-          .row()
-          .text(BUTTONS.BACK, 'back');
+        // Создаем минимальный контекст для вызова handleChallengeStartNotificationScene
+        const mockContext = {
+          from: { id: userId },
+          reply: async (text: string, options?: any) => {
+            return this.botApi!.sendMessage(userId, text, {
+              ...options,
+              disable_notification: true,
+            });
+          },
+          editMessageText: async (text: string, options?: any) => {
+            // Для уведомлений отправляем новое сообщение
+            return this.botApi!.sendMessage(userId, text, {
+              ...options,
+              disable_notification: true,
+            });
+          },
+        } as any;
 
-        await this.botApi.sendMessage(userId, MESSAGES.DURATION.TEXT, {
-          reply_markup: durationKeyboard,
-        });
+        await handleChallengeStartNotificationScene(mockContext);
       } catch (error) {
-        logger.error(`Error sending scheduled duration scene to user ${userId}:`, error);
+        logger.error(`Error sending scheduled challenge start notification to user ${userId}:`, error);
       }
     });
 
@@ -551,7 +558,7 @@ class SchedulerService {
   }
 
   /**
-   * Планирует отправку сцены выбора продолжительности в следующий понедельник в 12:00 МСК
+   * Планирует отправку сцены уведомления о старте челленджа в следующий понедельник в 12:00 МСК
    */
   scheduleMondayDuration(userId: number): void {
     const scheduledTime = this.getNextMonday12MSK();
@@ -563,18 +570,27 @@ class SchedulerService {
       }
 
       try {
-        const durationKeyboard = new InlineKeyboard()
-          .text(BUTTONS.DURATION_30, 'duration_30')
-          .text(BUTTONS.DURATION_60, 'duration_60')
-          .text(BUTTONS.DURATION_90, 'duration_90')
-          .row()
-          .text(BUTTONS.BACK, 'back');
+        // Создаем минимальный контекст для вызова handleChallengeStartNotificationScene
+        const mockContext = {
+          from: { id: userId },
+          reply: async (text: string, options?: any) => {
+            return this.botApi!.sendMessage(userId, text, {
+              ...options,
+              disable_notification: true,
+            });
+          },
+          editMessageText: async (text: string, options?: any) => {
+            // Для уведомлений отправляем новое сообщение
+            return this.botApi!.sendMessage(userId, text, {
+              ...options,
+              disable_notification: true,
+            });
+          },
+        } as any;
 
-        await this.botApi.sendMessage(userId, MESSAGES.DURATION.TEXT, {
-          reply_markup: durationKeyboard,
-        });
+        await handleChallengeStartNotificationScene(mockContext);
       } catch (error) {
-        logger.error(`Error sending scheduled duration scene to user ${userId}:`, error);
+        logger.error(`Error sending scheduled challenge start notification to user ${userId}:`, error);
       }
     });
 
