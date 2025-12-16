@@ -70,6 +70,9 @@ export class StateService {
             actor.send({ type: 'GO_TO_CHALLENGE_STATS' });
             actor.send({ type: 'GO_TO_CHALLENGE_SETTINGS' });
             actor.send({ type: 'GO_TO_EDIT_REMINDER_TIME' });
+          } else if (savedState === 'waiting_for_photo') {
+            actor.send({ type: 'GO_TO_CHALLENGE_STATS' });
+            actor.send({ type: 'GO_TO_WAITING_FOR_PHOTO' });
           } else {
             actor.send({ type: 'GO_TO_START' });
           }

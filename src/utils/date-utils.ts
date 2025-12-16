@@ -1,0 +1,29 @@
+/**
+ * Получает текущую дату в формате YYYY-MM-DD с учетом часового пояса пользователя
+ * @param timezoneOffset - Смещение часового пояса от UTC в часах (например, 3 для МСК)
+ * @returns Дата в формате YYYY-MM-DD
+ */
+export function getCurrentDateString(timezoneOffset: number | null = null): string {
+  const now = new Date();
+  
+  // Если указан часовой пояс, применяем смещение
+  if (timezoneOffset !== null) {
+    // Получаем UTC время
+    const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+    // Применяем смещение часового пояса
+    const localTime = new Date(utcTime + (timezoneOffset * 3600000));
+    
+    const year = localTime.getFullYear();
+    const month = String(localTime.getMonth() + 1).padStart(2, '0');
+    const day = String(localTime.getDate()).padStart(2, '0');
+    
+    return `${year}-${month}-${day}`;
+  }
+  
+  // Если часовой пояс не указан, используем UTC
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(now.getUTCDate()).padStart(2, '0');
+  
+  return `${year}-${month}-${day}`;
+}

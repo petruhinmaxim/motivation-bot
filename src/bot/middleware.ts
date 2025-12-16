@@ -1,4 +1,5 @@
 import type { Context, NextFunction } from 'grammy';
+import { InputFile } from 'grammy';
 import { stateService } from '../services/state.service.js';
 import { userService } from '../services/user.service.js';
 import { challengeService } from '../services/challenge.service.js';
@@ -22,6 +23,10 @@ import {
 import { MESSAGES } from '../scenes/messages.js';
 import { schedulerService } from '../services/scheduler.service.js';
 import { validateTime } from '../utils/time-validator.js';
+import { processImage } from '../utils/image-processor.js';
+import { getRandomMotivationalPhrase } from '../utils/motivational-phrases.js';
+import { getCurrentDateString } from '../utils/date-utils.js';
+import { env } from '../utils/env.js';
 
 export async function stateMiddleware(ctx: Context, next: NextFunction) {
   if (!ctx.from) {
@@ -155,11 +160,27 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         await handleEditReminderTimeScene(ctx);
         return;
       }
+
+      if (data === 'send_photo') {
+        // Отправляем сообщение с просьбой отправить фото
+        await ctx.answerCallbackQuery();
+        await ctx.reply('Отправь фото в чат и помни, жир не пройдет!');
+        // Переводим пользователя в сцену ожидания фото
+        await stateService.sendEvent(userId, { type: 'GO_TO_WAITING_FOR_PHOTO' });
+        return;
+      }
     }
 
     // Обрабатываем текстовые сообщения в зависимости от текущей сцены
     if (ctx.message?.text && ctx.message.text !== '/start') {
       const currentScene = await stateService.getCurrentScene(userId);
+      
+      // Если пользователь ожидал фото, но отправил текст, возвращаем в статистику
+      if (currentScene === 'waiting_for_photo') {
+        await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
+        await handleChallengeStatsScene(ctx);
+        return;
+      }
 
       // Обрабатываем timezone только если пользователь в сцене timezone
       if (currentScene === 'timezone') {
@@ -236,6 +257,79 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           return;
         }
       }
+    }
+
+    // Обрабатываем фото
+    if (ctx.message?.photo) {
+      const userId = ctx.from.id;
+      
+      // Проверяем, ожидаем ли мы фото от этого пользователя (проверяем сцену)
+      const currentScene = await stateService.getCurrentScene(userId);
+      
+      if (currentScene !== 'waiting_for_photo') {
+        // Если пользователь не нажимал кнопку "Отправить фото", отправляем сообщение и переводим на статистику
+        await ctx.reply('Для загрузки фото нажми на кнопку');
+        await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
+        await handleChallengeStatsScene(ctx);
+        return;
+      }
+      
+      const user = await userService.getUser(userId);
+      const timezoneOffset = user?.timezone ?? null;
+      const currentDate = getCurrentDateString(timezoneOffset);
+
+      // Проверяем, есть ли активный челлендж
+      const challenge = await challengeService.getActiveChallenge(userId);
+      if (!challenge) {
+        await ctx.reply('У тебя нет активного челленджа. Начни новый челлендж!');
+        return;
+      }
+
+      // Проверяем, было ли уже загружено фото сегодня
+      const alreadyUploaded = await challengeService.hasPhotoUploadedToday(userId, currentDate);
+      
+      if (alreadyUploaded) {
+        // Если фото уже было загружено сегодня
+        await ctx.reply('Вижу вторую тренировку - огонь. Мы засчитываем одну в день, но тело всё запомнило.');
+        // Возвращаем пользователя в сцену статистики
+        await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
+        // Отправляем сцену статистики
+        await handleChallengeStatsScene(ctx);
+        return;
+      }
+
+      try {
+        // Получаем самое большое фото (обычно последнее в массиве)
+        const photo = ctx.message.photo[ctx.message.photo.length - 1];
+        const file = await ctx.api.getFile(photo.file_id);
+        
+        // Скачиваем фото
+        const fileUrl = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${file.file_path}`;
+        const response = await fetch(fileUrl);
+        const imageBuffer = Buffer.from(await response.arrayBuffer());
+
+        // Обрабатываем изображение
+        const dayNumber = challenge.successfulDays + 1;
+        const processedImage = await processImage(imageBuffer, dayNumber, challenge.duration);
+
+        // Отправляем обработанное фото
+        await ctx.replyWithPhoto(new InputFile(processedImage, 'photo.jpg'), {
+          caption: getRandomMotivationalPhrase(),
+        });
+
+        // Увеличиваем successfulDays
+        await challengeService.incrementSuccessfulDays(userId, currentDate);
+
+        // Возвращаем пользователя в сцену статистики
+        await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
+        
+        // Отправляем сцену статистики
+        await handleChallengeStatsScene(ctx);
+      } catch (error) {
+        logger.error(`Error processing photo for user ${userId}:`, error);
+        await ctx.reply('Произошла ошибка при обработке фото. Попробуй еще раз.');
+      }
+      return;
     }
 
     // Если это не команда/кнопка, просто продолжаем

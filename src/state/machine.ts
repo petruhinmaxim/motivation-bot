@@ -18,6 +18,7 @@ export const botMachine = setup({
       | { type: 'GO_TO_CHALLENGE_SETTINGS' }
       | { type: 'GO_TO_EDIT_TIMEZONE' }
       | { type: 'GO_TO_EDIT_REMINDER_TIME' }
+      | { type: 'GO_TO_WAITING_FOR_PHOTO' }
       | { type: 'GO_BACK' },
   },
 }).createMachine({
@@ -191,6 +192,9 @@ export const botMachine = setup({
         GO_TO_CHALLENGE_SETTINGS: {
           target: 'challenge_settings',
         },
+        GO_TO_WAITING_FOR_PHOTO: {
+          target: 'waiting_for_photo',
+        },
         GO_BACK: {
           target: 'challenge_rules',
         },
@@ -247,6 +251,19 @@ export const botMachine = setup({
         },
         GO_BACK: {
           target: 'challenge_settings',
+        },
+        GO_TO_START: {
+          target: 'start',
+        },
+      },
+    },
+    waiting_for_photo: {
+      entry: ({ context }) => {
+        context.scene = 'waiting_for_photo';
+      },
+      on: {
+        GO_TO_CHALLENGE_STATS: {
+          target: 'challenge_stats',
         },
         GO_TO_START: {
           target: 'start',
