@@ -428,11 +428,17 @@ class SchedulerService {
       const mockContext = {
         from: { id: userId },
         reply: async (text: string, options?: any) => {
-          return this.botApi!.sendMessage(userId, text, options);
+          return this.botApi!.sendMessage(userId, text, {
+            ...options,
+            disable_notification: true,
+          });
         },
         editMessageText: async (text: string, options?: any) => {
           // Для напоминаний отправляем новое сообщение
-          return this.botApi!.sendMessage(userId, text, options);
+          return this.botApi!.sendMessage(userId, text, {
+            ...options,
+            disable_notification: true,
+          });
         },
       } as any;
 
