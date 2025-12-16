@@ -25,7 +25,7 @@ export async function handleChallengeStatsScene(ctx: Context) {
   // Форматируем время напоминания (обрезаем секунды, оставляем только HH:MM)
   const reminderTimeText = challenge.reminderTime 
     ? challenge.reminderTime.slice(0, 5) // Берем только первые 5 символов (HH:MM)
-    : 'не установлено';
+    : 'отключены';
 
   const messageText = 
     `📊 Статистика челленджа\n\n` +

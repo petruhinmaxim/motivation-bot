@@ -89,6 +89,26 @@ export class ChallengeService {
   }
 
   /**
+   * Отключает напоминания для активного челленджа и удаляет время напоминания
+   */
+  async disableReminders(userId: number): Promise<void> {
+    try {
+      await db
+        .update(challenges)
+        .set({
+          reminderStatus: false,
+          reminderTime: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(challenges.userId, userId));
+      logger.info(`Disabled reminders and cleared reminder time for user ${userId}`);
+    } catch (error) {
+      logger.error(`Error disabling reminders for user ${userId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Проверяет, было ли уже загружено фото сегодня
    * @param userId - ID пользователя
    * @param date - Дата в формате YYYY-MM-DD

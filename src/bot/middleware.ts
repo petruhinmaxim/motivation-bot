@@ -161,6 +161,24 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         return;
       }
 
+      if (data === 'disable_reminders') {
+        // Отключаем напоминания
+        await challengeService.disableReminders(userId);
+        schedulerService.cancelDailyReminder(userId);
+        await ctx.answerCallbackQuery('Уведомления отключены');
+        await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_SETTINGS' });
+        await handleChallengeSettingsScene(ctx);
+        return;
+      }
+
+      if (data === 'enable_reminders') {
+        // Включаем напоминания (нужно установить время)
+        await ctx.answerCallbackQuery('Сначала установите время уведомлений');
+        await stateService.sendEvent(userId, { type: 'GO_TO_EDIT_REMINDER_TIME' });
+        await handleEditReminderTimeScene(ctx);
+        return;
+      }
+
       if (data === 'send_photo') {
         // Отправляем сообщение с просьбой отправить фото
         await ctx.answerCallbackQuery();
@@ -227,6 +245,13 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         if (validation.isValid && validation.time) {
           // Сохраняем время напоминаний
           await challengeService.updateReminderTime(userId, validation.time);
+          
+          // Получаем часовой пояс пользователя и планируем напоминание
+          const user = await userService.getUser(userId);
+          if (user?.timezone !== null && user?.timezone !== undefined) {
+            await schedulerService.scheduleDailyReminder(userId, validation.time, user.timezone);
+          }
+          
           // Переходим к сцене правил челленджа
           await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_RULES' });
           await handleChallengeRulesScene(ctx);
@@ -245,6 +270,13 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         if (validation.isValid && validation.time) {
           // Сохраняем время напоминаний
           await challengeService.updateReminderTime(userId, validation.time);
+          
+          // Получаем часовой пояс пользователя и перепланируем напоминание
+          const user = await userService.getUser(userId);
+          if (user?.timezone !== null && user?.timezone !== undefined) {
+            await schedulerService.scheduleDailyReminder(userId, validation.time, user.timezone);
+          }
+          
           // Отправляем уведомление об успехе
           await ctx.reply('✅ Время уведомлений успешно изменено!');
           // Возвращаемся в настройки
