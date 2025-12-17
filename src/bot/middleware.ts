@@ -111,12 +111,30 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         // Определяем продолжительность челленджа
         const duration = data === 'duration_30' ? 30 : data === 'duration_60' ? 60 : 90;
         
-        // Создаем или обновляем челлендж
-        await challengeService.createOrUpdateChallenge(userId, duration);
-        
-        // Переходим к сцене выбора часового пояса
-        await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
-        await handleTimezoneScene(ctx);
+        try {
+          // Создаем новый челлендж
+          await challengeService.createOrUpdateChallenge(userId, duration);
+          
+          // Переходим к сцене выбора часового пояса
+          await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+          await handleTimezoneScene(ctx);
+        } catch (error: any) {
+          // Если у пользователя уже есть активный челлендж
+          if (error.message === 'User already has an active challenge') {
+            await ctx.reply('У тебя уже есть активный челлендж. Заверши его или дождись окончания.');
+            await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
+            await handleChallengeStatsScene(ctx);
+          } else {
+            logger.error(`Error creating challenge for user ${userId}:`, error);
+            await ctx.reply('Произошла ошибка при создании челленджа. Попробуй еще раз.');
+          }
+        }
+        return;
+      }
+
+      if (data === 'start_new_challenge') {
+        await stateService.sendEvent(userId, { type: 'GO_TO_START' });
+        await handleStartScene(ctx);
         return;
       }
 
@@ -319,6 +337,14 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       const challenge = await challengeService.getActiveChallenge(userId);
       if (!challenge) {
         await ctx.reply('У тебя нет активного челленджа. Начни новый челлендж!');
+        return;
+      }
+
+      // Проверяем, что челлендж активен (не провален)
+      if (challenge.status !== 'active') {
+        await ctx.reply('Этот челлендж уже завершен. Начни новый челлендж!');
+        await stateService.sendEvent(userId, { type: 'GO_TO_START' });
+        await handleStartScene(ctx);
         return;
       }
 

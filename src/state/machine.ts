@@ -20,6 +20,7 @@ export const botMachine = setup({
       | { type: 'GO_TO_EDIT_REMINDER_TIME' }
       | { type: 'GO_TO_WAITING_FOR_PHOTO' }
       | { type: 'GO_TO_MISSED_WORKOUT_REPORT' }
+      | { type: 'GO_TO_CHALLENGE_FAILED' }
       | { type: 'GO_BACK' },
   },
 }).createMachine({
@@ -279,6 +280,16 @@ export const botMachine = setup({
         GO_TO_CHALLENGE_STATS: {
           target: 'challenge_stats',
         },
+        GO_TO_START: {
+          target: 'start',
+        },
+      },
+    },
+    challenge_failed: {
+      entry: ({ context }) => {
+        context.scene = 'challenge_failed';
+      },
+      on: {
         GO_TO_START: {
           target: 'start',
         },

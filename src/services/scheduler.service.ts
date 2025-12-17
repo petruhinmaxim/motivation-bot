@@ -12,6 +12,7 @@ import {
 import { getRandomReminderPhrase } from '../utils/motivational-phrases.js';
 import { handleChallengeStatsScene } from '../scenes/challenge-stats.scene.js';
 import { handleChallengeStartNotificationScene } from '../scenes/challenge-start-notification.scene.js';
+import { handleChallengeFailedScene } from '../scenes/challenge-failed.scene.js';
 import { challengeService } from './challenge.service.js';
 import { userService } from './user.service.js';
 
@@ -439,7 +440,16 @@ class SchedulerService {
   private async performMidnightCheck(userId: number, timezone: number): Promise<void> {
     try {
       // Проверяем и увеличиваем счетчик дней без тренировки
-      await challengeService.checkAndIncrementMissedDays(userId, timezone);
+      const challengeFailed = await challengeService.checkAndIncrementMissedDays(userId, timezone);
+      
+      // Если челлендж был переведен в failed, отменяем только полночные проверки
+      // Напоминания оставляем активными, чтобы сцена провала была отправлена вместо напоминания
+      // Напоминания будут отменены после отправки сцены провала в sendDailyReminder
+      if (challengeFailed) {
+        this.cancelMidnightCheck(userId);
+        logger.info(`Challenge failed for user ${userId}, cancelled midnight checks. Reminder will send failed scene.`);
+      }
+      
       logger.info(`Midnight check completed for user ${userId}`);
     } catch (error) {
       logger.error(`Error performing midnight check for user ${userId}:`, error);
@@ -700,6 +710,42 @@ class SchedulerService {
   }
 
   /**
+   * Отправляет сцену провала челленджа пользователю
+   */
+  private async sendChallengeFailedScene(userId: number): Promise<void> {
+    if (!this.botApi) {
+      logger.error('Bot API is not initialized');
+      return;
+    }
+
+    try {
+      // Создаем минимальный контекст для вызова handleChallengeFailedScene
+      const mockContext = {
+        from: { id: userId },
+        reply: async (text: string, options?: any) => {
+          return this.botApi!.sendMessage(userId, text, {
+            ...options,
+            disable_notification: false,
+          });
+        },
+        editMessageText: async (text: string, options?: any) => {
+          // Для уведомлений отправляем новое сообщение
+          return this.botApi!.sendMessage(userId, text, {
+            ...options,
+            disable_notification: false,
+          });
+        },
+      } as any;
+
+      await handleChallengeFailedScene(mockContext);
+      logger.info(`Challenge failed scene sent to user ${userId}`);
+    } catch (error) {
+      logger.error(`Error sending challenge failed scene to user ${userId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Отправляет ежедневное напоминание пользователю
    */
   private async sendDailyReminder(userId: number, reminderTime: string, timezone: number): Promise<void> {
@@ -711,8 +757,23 @@ class SchedulerService {
     try {
       // Проверяем, что челлендж все еще активен
       const challenge = await challengeService.getActiveChallenge(userId);
-      if (!challenge || !challenge.reminderStatus || challenge.status !== 'active') {
+      if (!challenge || !challenge.reminderStatus) {
         logger.info(`Skipping reminder for user ${userId}: challenge inactive or reminders disabled`);
+        this.cancelDailyReminder(userId);
+        return;
+      }
+
+      // Если челлендж провален, отправляем сцену провала вместо напоминания
+      if (challenge.status === 'failed') {
+        await this.sendChallengeFailedScene(userId);
+        this.cancelDailyReminder(userId);
+        this.cancelMidnightCheck(userId);
+        return;
+      }
+
+      // Проверяем, что челлендж активен
+      if (challenge.status !== 'active') {
+        logger.info(`Skipping reminder for user ${userId}: challenge is not active`);
         this.cancelDailyReminder(userId);
         return;
       }

@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { db } from '../database/client.js';
 import { challenges } from '../database/schema.js';
 import logger from '../utils/logger.js';
@@ -8,8 +8,8 @@ import { getYesterdayDateString } from '../utils/date-utils.js';
 
 export class ChallengeService {
   /**
-   * Создает или обновляет челлендж для пользователя
-   * Если запись уже существует, обновляет статус на активен и другие поля
+   * Создает новый челлендж для пользователя
+   * Блокирует создание, если у пользователя уже есть активный челлендж
    */
   async createOrUpdateChallenge(
     userId: number,
@@ -17,53 +17,45 @@ export class ChallengeService {
     startDate: Date = new Date()
   ): Promise<void> {
     try {
-      // Проверяем, есть ли уже запись для пользователя
-      const existingChallenge = await db
-        .select()
-        .from(challenges)
-        .where(eq(challenges.userId, userId))
-        .limit(1);
-
-      if (existingChallenge.length > 0) {
-        // Обновляем существующую запись
-        await db
-          .update(challenges)
-          .set({
-            status: 'active',
-            duration,
-            startDate,
-            updatedAt: new Date(),
-          })
-          .where(eq(challenges.userId, userId));
-        logger.info(`Updated challenge for user ${userId} with duration ${duration} days`);
-      } else {
-        // Создаем новую запись
-        await db.insert(challenges).values({
-          userId,
-          startDate,
-          status: 'active',
-          duration,
-          restartCount: 0,
-          daysWithoutWorkout: 0,
-          successfulDays: 0,
-          reminderStatus: false,
-        });
-        logger.info(`Created new challenge for user ${userId} with duration ${duration} days`);
+      // Проверяем, есть ли уже активный челлендж
+      const activeChallenge = await this.getActiveChallenge(userId);
+      
+      if (activeChallenge) {
+        throw new Error('User already has an active challenge');
       }
+
+      // Создаем новую запись
+      await db.insert(challenges).values({
+        userId,
+        startDate,
+        status: 'active',
+        duration,
+        restartCount: 0,
+        daysWithoutWorkout: 0,
+        successfulDays: 0,
+        reminderStatus: false,
+      });
+      logger.info(`Created new challenge for user ${userId} with duration ${duration} days`);
     } catch (error) {
-      logger.error(`Error creating/updating challenge for user ${userId}:`, error);
+      logger.error(`Error creating challenge for user ${userId}:`, error);
       throw error;
     }
   }
 
   /**
-   * Получает активный челлендж пользователя
+   * Получает активный челлендж пользователя (самый новый активный)
    */
   async getActiveChallenge(userId: number) {
     const result = await db
       .select()
       .from(challenges)
-      .where(eq(challenges.userId, userId))
+      .where(
+        and(
+          eq(challenges.userId, userId),
+          eq(challenges.status, 'active')
+        )
+      )
+      .orderBy(desc(challenges.id))
       .limit(1);
 
     return result[0] || null;
@@ -74,6 +66,11 @@ export class ChallengeService {
    */
   async updateReminderTime(userId: number, reminderTime: string): Promise<void> {
     try {
+      const challenge = await this.getActiveChallenge(userId);
+      if (!challenge) {
+        throw new Error(`Active challenge not found for user ${userId}`);
+      }
+
       await db
         .update(challenges)
         .set({
@@ -81,7 +78,7 @@ export class ChallengeService {
           reminderStatus: true,
           updatedAt: new Date(),
         })
-        .where(eq(challenges.userId, userId));
+        .where(eq(challenges.id, challenge.id));
       logger.info(`Updated reminder time for user ${userId}: ${reminderTime}`);
     } catch (error) {
       logger.error(`Error updating reminder time for user ${userId}:`, error);
@@ -94,6 +91,11 @@ export class ChallengeService {
    */
   async disableReminders(userId: number): Promise<void> {
     try {
+      const challenge = await this.getActiveChallenge(userId);
+      if (!challenge) {
+        throw new Error(`Active challenge not found for user ${userId}`);
+      }
+
       await db
         .update(challenges)
         .set({
@@ -101,7 +103,7 @@ export class ChallengeService {
           reminderTime: null,
           updatedAt: new Date(),
         })
-        .where(eq(challenges.userId, userId));
+        .where(eq(challenges.id, challenge.id));
       logger.info(`Disabled reminders and cleared reminder time for user ${userId}`);
     } catch (error) {
       logger.error(`Error disabling reminders for user ${userId}:`, error);
@@ -140,10 +142,15 @@ export class ChallengeService {
         return false;
       }
 
-      // Получаем текущее значение successfulDays
+      // Получаем активный челлендж
       const challenge = await this.getActiveChallenge(userId);
       if (!challenge) {
         throw new Error(`Active challenge not found for user ${userId}`);
+      }
+
+      // Проверяем, что челлендж активен
+      if (challenge.status !== 'active') {
+        throw new Error(`Challenge is not active for user ${userId}`);
       }
 
       // Увеличиваем successfulDays и обнуляем счетчик пропущенных дней
@@ -154,7 +161,7 @@ export class ChallengeService {
           daysWithoutWorkout: 0, // Обнуляем счетчик пропущенных дней после загрузки фото
           updatedAt: new Date(),
         })
-        .where(eq(challenges.userId, userId));
+        .where(eq(challenges.id, challenge.id));
 
       // Отмечаем, что фото было загружено сегодня (ключ истекает через 24 часа)
       const key = getPhotoUploadKey(userId, date);
@@ -169,16 +176,46 @@ export class ChallengeService {
   }
 
   /**
+   * Переводит активный челлендж в статус failed
+   * @param userId - ID пользователя
+   */
+  async failChallenge(userId: number): Promise<void> {
+    try {
+      const challenge = await this.getActiveChallenge(userId);
+      if (!challenge) {
+        logger.warn(`No active challenge found for user ${userId} to fail`);
+        return;
+      }
+
+      await db
+        .update(challenges)
+        .set({
+          status: 'failed',
+          daysWithoutWorkout: 0,
+          updatedAt: new Date(),
+        })
+        .where(eq(challenges.id, challenge.id));
+
+      logger.info(`Failed challenge ${challenge.id} for user ${userId}`);
+    } catch (error) {
+      logger.error(`Error failing challenge for user ${userId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Проверяет и увеличивает счетчик дней без тренировки, если фото не было загружено вчера
    * Вызывается в полночь по часовому поясу пользователя
+   * Если daysWithoutWorkout достигает 3, переводит челлендж в статус failed
    * @param userId - ID пользователя
    * @param timezoneOffset - Смещение часового пояса от UTC в часах
+   * @returns true, если челлендж был переведен в failed, false в противном случае
    */
-  async checkAndIncrementMissedDays(userId: number, timezoneOffset: number): Promise<void> {
+  async checkAndIncrementMissedDays(userId: number, timezoneOffset: number): Promise<boolean> {
     try {
       const challenge = await this.getActiveChallenge(userId);
       if (!challenge || challenge.status !== 'active') {
-        return;
+        return false;
       }
 
       // Получаем вчерашнюю дату в часовом поясе пользователя
@@ -188,21 +225,33 @@ export class ChallengeService {
       const hadPhotoYesterday = await this.hasPhotoUploadedToday(userId, yesterdayDate);
 
       if (!hadPhotoYesterday) {
+        const newDaysWithoutWorkout = challenge.daysWithoutWorkout + 1;
+        
         // Увеличиваем счетчик дней без тренировки
         await db
           .update(challenges)
           .set({
-            daysWithoutWorkout: challenge.daysWithoutWorkout + 1,
+            daysWithoutWorkout: newDaysWithoutWorkout,
             updatedAt: new Date(),
           })
-          .where(eq(challenges.userId, userId));
+          .where(eq(challenges.id, challenge.id));
 
-        logger.info(`Incremented daysWithoutWorkout for user ${userId} (yesterday: ${yesterdayDate})`);
+        logger.info(`Incremented daysWithoutWorkout for user ${userId} to ${newDaysWithoutWorkout} (yesterday: ${yesterdayDate})`);
+
+        // Если достигли 3 дней без тренировки, переводим челлендж в failed
+        if (newDaysWithoutWorkout >= 3) {
+          await this.failChallenge(userId);
+          logger.info(`Challenge failed for user ${userId} after 3 missed days`);
+          return true;
+        }
       } else {
         logger.debug(`Photo was uploaded yesterday for user ${userId}, no increment needed`);
       }
+
+      return false;
     } catch (error) {
       logger.error(`Error checking and incrementing missed days for user ${userId}:`, error);
+      return false;
     }
   }
 

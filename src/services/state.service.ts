@@ -73,6 +73,8 @@ export class StateService {
           } else if (savedState === 'waiting_for_photo') {
             actor.send({ type: 'GO_TO_CHALLENGE_STATS' });
             actor.send({ type: 'GO_TO_WAITING_FOR_PHOTO' });
+          } else if (savedState === 'challenge_failed') {
+            actor.send({ type: 'GO_TO_CHALLENGE_FAILED' });
           } else {
             actor.send({ type: 'GO_TO_START' });
           }
