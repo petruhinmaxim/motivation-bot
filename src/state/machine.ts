@@ -19,6 +19,7 @@ export const botMachine = setup({
       | { type: 'GO_TO_EDIT_TIMEZONE' }
       | { type: 'GO_TO_EDIT_REMINDER_TIME' }
       | { type: 'GO_TO_WAITING_FOR_PHOTO' }
+      | { type: 'GO_TO_MISSED_WORKOUT_REPORT' }
       | { type: 'GO_BACK' },
   },
 }).createMachine({
@@ -260,6 +261,19 @@ export const botMachine = setup({
     waiting_for_photo: {
       entry: ({ context }) => {
         context.scene = 'waiting_for_photo';
+      },
+      on: {
+        GO_TO_CHALLENGE_STATS: {
+          target: 'challenge_stats',
+        },
+        GO_TO_START: {
+          target: 'start',
+        },
+      },
+    },
+    missed_workout_report: {
+      entry: ({ context }) => {
+        context.scene = 'missed_workout_report';
       },
       on: {
         GO_TO_CHALLENGE_STATS: {

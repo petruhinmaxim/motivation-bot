@@ -1,4 +1,4 @@
-import { pgTable, bigint, varchar, boolean, timestamp, integer, time, serial } from 'drizzle-orm/pg-core';
+import { pgTable, bigint, varchar, boolean, timestamp, integer, time, serial, text } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 export const users = pgTable('users', {
@@ -34,10 +34,26 @@ export const usersRelations = relations(users, ({ many }) => ({
   challenges: many(challenges),
 }));
 
-export const challengesRelations = relations(challenges, ({ one }) => ({
+export const missedWorkoutReports = pgTable('missed_workout_reports', {
+  id: serial('id').primaryKey(),
+  challengeId: integer('challenge_id').notNull().references(() => challenges.id),
+  text: text('text').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const challengesRelations = relations(challenges, ({ one, many }) => ({
   user: one(users, {
     fields: [challenges.userId],
     references: [users.id],
+  }),
+  missedWorkoutReports: many(missedWorkoutReports),
+}));
+
+export const missedWorkoutReportsRelations = relations(missedWorkoutReports, ({ one }) => ({
+  challenge: one(challenges, {
+    fields: [missedWorkoutReports.challengeId],
+    references: [challenges.id],
   }),
 }));
 
@@ -45,4 +61,6 @@ export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Challenge = typeof challenges.$inferSelect;
 export type NewChallenge = typeof challenges.$inferInsert;
+export type MissedWorkoutReport = typeof missedWorkoutReports.$inferSelect;
+export type NewMissedWorkoutReport = typeof missedWorkoutReports.$inferInsert;
 

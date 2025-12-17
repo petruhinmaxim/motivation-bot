@@ -12,4 +12,5 @@ export * from './challenge-settings.scene.js';
 export * from './edit-timezone.scene.js';
 export * from './edit-reminder-time.scene.js';
 export * from './challenge-start-notification.scene.js';
+export * from './missed-workout-report.scene.js';
 

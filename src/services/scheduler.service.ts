@@ -6,11 +6,14 @@ import {
   getScheduledTasksKey,
   getDailyRemindersKey,
   getDailyReminderDataKey,
+  getMidnightChecksKey,
+  getMidnightCheckDataKey,
 } from '../redis/keys.js';
 import { getRandomReminderPhrase } from '../utils/motivational-phrases.js';
 import { handleChallengeStatsScene } from '../scenes/challenge-stats.scene.js';
 import { handleChallengeStartNotificationScene } from '../scenes/challenge-start-notification.scene.js';
 import { challengeService } from './challenge.service.js';
+import { userService } from './user.service.js';
 
 interface ScheduledTask {
   userId: number;
@@ -31,9 +34,16 @@ interface DailyReminderData {
   scheduledTime: string; // ISO string of next scheduled reminder
 }
 
+interface MidnightCheckData {
+  userId: number;
+  timezone: number; // UTC offset in hours
+  scheduledTime: string; // ISO string of next scheduled midnight check
+}
+
 class SchedulerService {
   private tasks = new Map<number, ScheduledTask>();
   private dailyReminders = new Map<number, ScheduledTask>();
+  private midnightChecks = new Map<number, ScheduledTask>();
   private botApi: Api | null = null;
   private isRestoring = false; // Флаг для предотвращения параллельных вызовов restoreTasks
 
@@ -93,6 +103,12 @@ class SchedulerService {
 
       // Восстанавливаем ежедневные напоминания
       await this.restoreDailyReminders();
+      
+      // Восстанавливаем полночные проверки
+      await this.restoreMidnightChecks();
+      
+      // Инициализируем полночные проверки для всех активных челленджей, которые еще не запланированы
+      await this.initializeMidnightChecksForActiveChallenges();
     } catch (error) {
       logger.error('Error restoring tasks from Redis:', error);
     } finally {
@@ -327,6 +343,268 @@ class SchedulerService {
   }
 
   /**
+   * Получает время следующей полночи в часовом поясе пользователя
+   * @param timezone - Смещение от UTC в часах
+   * @returns Дата следующей полночи в UTC
+   */
+  private getNextMidnightTime(timezone: number): Date {
+    const now = new Date();
+    
+    // Вычисляем текущее время в часовом поясе пользователя
+    const userTimezoneOffset = timezone * 60 * 60 * 1000; // в миллисекундах
+    const userTime = new Date(now.getTime() + userTimezoneOffset);
+    
+    // Создаем дату с полночью в часовом поясе пользователя
+    const midnightDate = new Date(userTime);
+    midnightDate.setUTCHours(0, 0, 0, 0);
+    
+    // Если полночь уже прошла сегодня, планируем на завтра
+    if (midnightDate <= userTime) {
+      midnightDate.setUTCDate(midnightDate.getUTCDate() + 1);
+    }
+    
+    // Конвертируем обратно в UTC
+    return new Date(midnightDate.getTime() - userTimezoneOffset);
+  }
+
+  /**
+   * Планирует полночную проверку для пользователя
+   * @param userId - ID пользователя
+   * @param timezone - Смещение от UTC в часах
+   */
+  async scheduleMidnightCheck(userId: number, timezone: number): Promise<void> {
+    // Отменяем предыдущую проверку, если есть
+    this.cancelMidnightCheck(userId);
+
+    const scheduledTime = this.getNextMidnightTime(timezone);
+    const now = new Date();
+    const delay = scheduledTime.getTime() - now.getTime();
+
+    if (delay <= 0) {
+      logger.warn(`Scheduled midnight time is in the past for user ${userId}, scheduling for tomorrow`);
+      // Если время уже прошло, планируем на завтра
+      const tomorrowTime = this.getNextMidnightTime(timezone);
+      const tomorrowDelay = tomorrowTime.getTime() - now.getTime();
+      this.scheduleMidnightCheckInternal(userId, timezone, tomorrowTime, tomorrowDelay);
+      return;
+    }
+
+    this.scheduleMidnightCheckInternal(userId, timezone, scheduledTime, delay);
+  }
+
+  /**
+   * Внутренний метод для планирования полночной проверки
+   */
+  private scheduleMidnightCheckInternal(
+    userId: number,
+    timezone: number,
+    scheduledTime: Date,
+    delay: number
+  ): void {
+    logger.info(
+      `Scheduling midnight check for user ${userId} at ${scheduledTime.toISOString()} (in ${Math.round(delay / 1000)}s)`
+    );
+
+    const timeoutId = setTimeout(async () => {
+      try {
+        await this.performMidnightCheck(userId, timezone);
+        this.midnightChecks.delete(userId);
+        // Планируем следующую проверку
+        await this.scheduleMidnightCheck(userId, timezone);
+      } catch (error) {
+        logger.error(`Error in midnight check for user ${userId}:`, error);
+        this.midnightChecks.delete(userId);
+        // Пытаемся запланировать следующую проверку даже при ошибке
+        try {
+          await this.scheduleMidnightCheck(userId, timezone);
+        } catch (retryError) {
+          logger.error(`Error retrying midnight check for user ${userId}:`, retryError);
+        }
+      }
+    }, delay);
+
+    this.midnightChecks.set(userId, {
+      userId,
+      timeoutId,
+      scheduledTime,
+    });
+
+    // Сохраняем в Redis
+    this.saveMidnightCheckToRedis(userId, timezone, scheduledTime);
+  }
+
+  /**
+   * Выполняет полночную проверку для пользователя
+   */
+  private async performMidnightCheck(userId: number, timezone: number): Promise<void> {
+    try {
+      // Проверяем и увеличиваем счетчик дней без тренировки
+      await challengeService.checkAndIncrementMissedDays(userId, timezone);
+      logger.info(`Midnight check completed for user ${userId}`);
+    } catch (error) {
+      logger.error(`Error performing midnight check for user ${userId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Сохраняет полночную проверку в Redis
+   */
+  private async saveMidnightCheckToRedis(
+    userId: number,
+    timezone: number,
+    scheduledTime: Date
+  ): Promise<void> {
+    try {
+      const checkData: MidnightCheckData = {
+        userId,
+        timezone,
+        scheduledTime: scheduledTime.toISOString(),
+      };
+
+      // Сохраняем данные проверки
+      const ttlSeconds = Math.ceil((scheduledTime.getTime() - Date.now()) / 1000) + 86400; // TTL = время до выполнения + 1 день
+      await redis.set(
+        getMidnightCheckDataKey(userId),
+        JSON.stringify(checkData),
+        'EX',
+        ttlSeconds > 0 ? ttlSeconds : 86400
+      );
+
+      // Добавляем в список всех полночных проверок
+      const checksKey = getMidnightChecksKey();
+      const existingChecksJson = await redis.get(checksKey);
+      const existingChecks: MidnightCheckData[] = existingChecksJson ? JSON.parse(existingChecksJson) : [];
+      
+      // Удаляем старую проверку для этого пользователя, если есть
+      const filteredChecks = existingChecks.filter(c => c.userId !== userId);
+      filteredChecks.push(checkData);
+
+      await redis.set(checksKey, JSON.stringify(filteredChecks));
+    } catch (error) {
+      logger.error(`Error saving midnight check to Redis for user ${userId}:`, error);
+    }
+  }
+
+  /**
+   * Восстанавливает полночные проверки из Redis
+   */
+  private async restoreMidnightChecks(): Promise<void> {
+    try {
+      const checksJson = await redis.get(getMidnightChecksKey());
+      if (!checksJson) {
+        logger.info('No midnight checks to restore');
+        return;
+      }
+
+      const checks: MidnightCheckData[] = JSON.parse(checksJson);
+      let restoredCount = 0;
+
+      for (const check of checks) {
+        try {
+          // Проверяем, не запланирована ли уже проверка для этого пользователя
+          if (this.midnightChecks.has(check.userId)) {
+            logger.warn(`Midnight check already scheduled for user ${check.userId}, skipping restore`);
+            continue;
+          }
+
+          // Проверяем, что челлендж все еще активен
+          const challenge = await challengeService.getActiveChallenge(check.userId);
+          if (!challenge || challenge.status !== 'active') {
+            logger.warn(`Skipping midnight check for user ${check.userId}: challenge inactive`);
+            await this.removeMidnightCheckFromRedis(check.userId);
+            continue;
+          }
+
+          // Проверяем, что пользователь имеет часовой пояс
+          const user = await userService.getUser(check.userId);
+          if (!user || user.timezone === null || user.timezone === undefined) {
+            logger.warn(`Skipping midnight check for user ${check.userId}: timezone not set`);
+            await this.removeMidnightCheckFromRedis(check.userId);
+            continue;
+          }
+
+          // Планируем следующую проверку
+          await this.scheduleMidnightCheck(check.userId, check.timezone);
+          restoredCount++;
+        } catch (error) {
+          logger.error(`Error restoring midnight check for user ${check.userId}:`, error);
+        }
+      }
+
+      logger.info(`Restored ${restoredCount} midnight checks from Redis`);
+    } catch (error) {
+      logger.error('Error restoring midnight checks from Redis:', error);
+    }
+  }
+
+  /**
+   * Удаляет полночную проверку из Redis
+   */
+  private async removeMidnightCheckFromRedis(userId: number): Promise<void> {
+    try {
+      await redis.del(getMidnightCheckDataKey(userId));
+
+      const checksKey = getMidnightChecksKey();
+      const existingChecksJson = await redis.get(checksKey);
+      if (existingChecksJson) {
+        const existingChecks: MidnightCheckData[] = JSON.parse(existingChecksJson);
+        const filteredChecks = existingChecks.filter(c => c.userId !== userId);
+        await redis.set(checksKey, JSON.stringify(filteredChecks));
+      }
+    } catch (error) {
+      logger.error(`Error removing midnight check from Redis for user ${userId}:`, error);
+    }
+  }
+
+  /**
+   * Отменяет полночную проверку для пользователя
+   */
+  cancelMidnightCheck(userId: number): void {
+    const check = this.midnightChecks.get(userId);
+    if (check) {
+      clearTimeout(check.timeoutId);
+      this.midnightChecks.delete(userId);
+      this.removeMidnightCheckFromRedis(userId);
+      logger.info(`Cancelled midnight check for user ${userId}`);
+    }
+  }
+
+  /**
+   * Инициализирует полночные проверки для всех активных челленджей, которые еще не запланированы
+   */
+  private async initializeMidnightChecksForActiveChallenges(): Promise<void> {
+    try {
+      const activeChallenges = await challengeService.getAllActiveChallenges();
+      let initializedCount = 0;
+
+      for (const challenge of activeChallenges) {
+        // Пропускаем, если проверка уже запланирована
+        if (this.midnightChecks.has(challenge.userId)) {
+          continue;
+        }
+
+        // Получаем пользователя для получения часового пояса
+        const user = await userService.getUser(challenge.userId);
+        if (!user || user.timezone === null || user.timezone === undefined) {
+          logger.warn(`Skipping midnight check initialization for user ${challenge.userId}: timezone not set`);
+          continue;
+        }
+
+        // Планируем полночную проверку
+        await this.scheduleMidnightCheck(challenge.userId, user.timezone);
+        initializedCount++;
+      }
+
+      if (initializedCount > 0) {
+        logger.info(`Initialized ${initializedCount} midnight checks for active challenges`);
+      }
+    } catch (error) {
+      logger.error('Error initializing midnight checks for active challenges:', error);
+    }
+  }
+
+  /**
    * Вычисляет следующее время напоминания с учетом часового пояса пользователя
    * @param reminderTime - время в формате HH:MM
    * @param timezone - смещение от UTC в часах
@@ -439,32 +717,42 @@ class SchedulerService {
         return;
       }
 
-      // Отправляем мотивационное сообщение
-      const reminderPhrase = getRandomReminderPhrase();
-      await this.botApi.sendMessage(userId, reminderPhrase);
+      // Проверяем, есть ли пропущенные дни
+      if (challenge.daysWithoutWorkout > 0) {
+        // Отправляем сообщение о пропущенной тренировке
+        const missedWorkoutText = 
+          'Вчера ты дал жиру отдохнуть. Поделишься своим отчётом? Отправь его в чат, я сохраню, и по завершению челленджа ты увидишь, где были сложности и как прогрессировал.';
+        
+        await this.botApi.sendMessage(userId, missedWorkoutText);
+        logger.info(`Missed workout reminder sent to user ${userId}`);
+      } else {
+        // Отправляем обычное мотивационное сообщение
+        const reminderPhrase = getRandomReminderPhrase();
+        await this.botApi.sendMessage(userId, reminderPhrase);
 
-      // Отправляем сцену статистики челленджа
-      // Создаем минимальный контекст для вызова handleChallengeStatsScene
-      const mockContext = {
-        from: { id: userId },
-        reply: async (text: string, options?: any) => {
-          return this.botApi!.sendMessage(userId, text, {
-            ...options,
-            disable_notification: true,
-          });
-        },
-        editMessageText: async (text: string, options?: any) => {
-          // Для напоминаний отправляем новое сообщение
-          return this.botApi!.sendMessage(userId, text, {
-            ...options,
-            disable_notification: true,
-          });
-        },
-      } as any;
+        // Отправляем сцену статистики челленджа
+        // Создаем минимальный контекст для вызова handleChallengeStatsScene
+        const mockContext = {
+          from: { id: userId },
+          reply: async (text: string, options?: any) => {
+            return this.botApi!.sendMessage(userId, text, {
+              ...options,
+              disable_notification: true,
+            });
+          },
+          editMessageText: async (text: string, options?: any) => {
+            // Для напоминаний отправляем новое сообщение
+            return this.botApi!.sendMessage(userId, text, {
+              ...options,
+              disable_notification: true,
+            });
+          },
+        } as any;
 
-      await handleChallengeStatsScene(mockContext);
+        await handleChallengeStatsScene(mockContext);
 
-      logger.info(`Daily reminder sent to user ${userId}`);
+        logger.info(`Daily reminder sent to user ${userId}`);
+      }
     } catch (error) {
       logger.error(`Error sending daily reminder to user ${userId}:`, error);
       throw error;

@@ -13,3 +13,7 @@ export const getDailyReminderDataKey = (userId: number): string => `scheduler:da
 // Ключ для отслеживания загрузки фото за день (формат: YYYY-MM-DD)
 export const getPhotoUploadKey = (userId: number, date: string): string => `photo_upload:${userId}:${date}`;
 
+// Ключи для полночных проверок
+export const getMidnightChecksKey = (): string => 'scheduler:midnight_checks';
+export const getMidnightCheckDataKey = (userId: number): string => `scheduler:midnight_check:${userId}`;
+

@@ -20,6 +20,7 @@ import {
   handleEditTimezoneScene,
   handleEditReminderTimeScene,
 } from '../scenes/index.js';
+import { missedWorkoutReportService } from '../services/missed-workout-report.service.js';
 import { MESSAGES } from '../scenes/messages.js';
 import { schedulerService } from '../services/scheduler.service.js';
 import { validateTime } from '../utils/time-validator.js';
@@ -250,6 +251,8 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           const user = await userService.getUser(userId);
           if (user?.timezone !== null && user?.timezone !== undefined) {
             await schedulerService.scheduleDailyReminder(userId, validation.time, user.timezone);
+            // Планируем полночную проверку
+            await schedulerService.scheduleMidnightCheck(userId, user.timezone);
           }
           
           // Переходим к сцене правил челленджа
@@ -275,6 +278,8 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           const user = await userService.getUser(userId);
           if (user?.timezone !== null && user?.timezone !== undefined) {
             await schedulerService.scheduleDailyReminder(userId, validation.time, user.timezone);
+            // Перепланируем полночную проверку
+            await schedulerService.scheduleMidnightCheck(userId, user.timezone);
           }
           
           // Отправляем уведомление об успехе
@@ -362,6 +367,37 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         await ctx.reply('Произошла ошибка при обработке фото. Попробуй еще раз.');
       }
       return;
+    }
+
+    // Обрабатываем текст как отчет о пропущенной тренировке
+    // Если пользователь отправил текст (не команду, не фото), и у него есть пропущенные дни
+    if (ctx.message?.text && !ctx.message.text.startsWith('/')) {
+      const currentScene = await stateService.getCurrentScene(userId);
+      
+      // Проверяем, что пользователь не в другой специальной сцене
+      const specialScenes = ['timezone', 'reminder_time', 'edit_timezone', 'edit_reminder_time', 'waiting_for_photo'];
+      if (!specialScenes.includes(currentScene)) {
+        // Проверяем, есть ли активный челлендж и пропущенные дни
+        const challenge = await challengeService.getActiveChallenge(userId);
+        if (challenge && challenge.daysWithoutWorkout > 0) {
+          // Сохраняем отчет
+          try {
+            await missedWorkoutReportService.createReport(challenge.id, ctx.message.text);
+            
+            // Отправляем подтверждение
+            await ctx.reply('Отчет сохранен');
+            
+            // Переводим на сцену статистики
+            await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
+            await handleChallengeStatsScene(ctx);
+            return;
+          } catch (error) {
+            logger.error(`Error saving missed workout report for user ${userId}:`, error);
+            await ctx.reply('Произошла ошибка при сохранении отчета. Попробуй еще раз.');
+            return;
+          }
+        }
+      }
     }
 
     // Если это не команда/кнопка, просто продолжаем

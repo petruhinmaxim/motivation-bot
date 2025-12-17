@@ -4,6 +4,7 @@ import { challenges } from '../database/schema.js';
 import logger from '../utils/logger.js';
 import redis from '../redis/client.js';
 import { getPhotoUploadKey } from '../redis/keys.js';
+import { getYesterdayDateString } from '../utils/date-utils.js';
 
 export class ChallengeService {
   /**
@@ -165,6 +166,56 @@ export class ChallengeService {
       logger.error(`Error incrementing successfulDays for user ${userId}:`, error);
       throw error;
     }
+  }
+
+  /**
+   * Проверяет и увеличивает счетчик дней без тренировки, если фото не было загружено вчера
+   * Вызывается в полночь по часовому поясу пользователя
+   * @param userId - ID пользователя
+   * @param timezoneOffset - Смещение часового пояса от UTC в часах
+   */
+  async checkAndIncrementMissedDays(userId: number, timezoneOffset: number): Promise<void> {
+    try {
+      const challenge = await this.getActiveChallenge(userId);
+      if (!challenge || challenge.status !== 'active') {
+        return;
+      }
+
+      // Получаем вчерашнюю дату в часовом поясе пользователя
+      const yesterdayDate = getYesterdayDateString(timezoneOffset);
+
+      // Проверяем, было ли загружено фото вчера
+      const hadPhotoYesterday = await this.hasPhotoUploadedToday(userId, yesterdayDate);
+
+      if (!hadPhotoYesterday) {
+        // Увеличиваем счетчик дней без тренировки
+        await db
+          .update(challenges)
+          .set({
+            daysWithoutWorkout: challenge.daysWithoutWorkout + 1,
+            updatedAt: new Date(),
+          })
+          .where(eq(challenges.userId, userId));
+
+        logger.info(`Incremented daysWithoutWorkout for user ${userId} (yesterday: ${yesterdayDate})`);
+      } else {
+        logger.debug(`Photo was uploaded yesterday for user ${userId}, no increment needed`);
+      }
+    } catch (error) {
+      logger.error(`Error checking and incrementing missed days for user ${userId}:`, error);
+    }
+  }
+
+  /**
+   * Получает все активные челленджи (для полночной проверки)
+   */
+  async getAllActiveChallenges() {
+    const result = await db
+      .select()
+      .from(challenges)
+      .where(eq(challenges.status, 'active'));
+
+    return result;
   }
 }
 
