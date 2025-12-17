@@ -32,7 +32,7 @@ export async function handleChallengeStatsScene(ctx: Context) {
     `Дата начала челленджа: ${formattedStartDate}\n` +
     `Количество дней ${challenge.successfulDays} / ${challenge.duration}\n` +
     `Пропущено дней подряд: ${challenge.daysWithoutWorkout}\n` +
-    `Время напоминания: ${reminderTimeText}`;
+    `Начало тренировки: ${reminderTimeText}`;
 
   const keyboard = new InlineKeyboard()
     .text('📸 Отправить фото', 'send_photo')
