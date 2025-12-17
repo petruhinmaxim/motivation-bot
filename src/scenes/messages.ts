@@ -130,7 +130,7 @@ export const MESSAGE_FUNCTIONS = {
     `Дата начала челленджа: ${startDate}\n` +
     `Количество дней ${successfulDays} / ${duration}\n` +
     `Пропущено дней подряд: ${daysWithoutWorkout}\n` +
-    `Начало тренировки: ${reminderTime}`,
+    `Время уведомлений: ${reminderTime}`,
   EDIT_REMINDER_TIME_TEXT: (timezoneText: string) =>
     `Твой часовой пояс: ${timezoneText}. Напиши в чат новое время напоминаний, к примеру "14:00"`,
   REMINDER_TIME_TEXT: (timezoneText: string) =>

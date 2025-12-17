@@ -15,6 +15,13 @@
       "when": 1765973712450,
       "tag": "0001_futuristic_queen_noir",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1765982093923,
+      "tag": "0002_brief_king_cobra",
+      "breakpoints": true
     }
   ]
 }

@@ -11,6 +11,7 @@ export const users = pgTable('users', {
   isPremium: boolean('is_premium'),
   addedToAttachmentMenu: boolean('added_to_attachment_menu'),
   timezone: integer('timezone'), // Смещение от UTC в часах
+  blockedAt: timestamp('blocked_at'), // Дата блокировки бота пользователем
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

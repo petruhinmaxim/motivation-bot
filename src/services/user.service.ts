@@ -26,9 +26,15 @@ export class UserService {
         .limit(1);
 
       if (existingUser.length > 0) {
+        // Если пользователь взаимодействует с ботом, сбрасываем статус блокировки
+        // (на случай, если событие my_chat_member не сработало)
+        const updateData = existingUser[0].blockedAt
+          ? { ...userData, blockedAt: null }
+          : userData;
+
         await db
           .update(users)
-          .set(userData)
+          .set(updateData)
           .where(eq(users.id, telegramUser.id));
         logger.debug(`Updated user ${telegramUser.id}`);
       } else {
@@ -66,6 +72,38 @@ export class UserService {
       logger.info(`Updated timezone for user ${userId}: UTC${timezone >= 0 ? '+' : ''}${timezone}`);
     } catch (error) {
       logger.error(`Error updating timezone for user ${userId}:`, error);
+      throw error;
+    }
+  }
+
+  async markUserAsBlocked(userId: number): Promise<void> {
+    try {
+      await db
+        .update(users)
+        .set({
+          blockedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, userId));
+      logger.info(`User ${userId} marked as blocked`);
+    } catch (error) {
+      logger.error(`Error marking user ${userId} as blocked:`, error);
+      throw error;
+    }
+  }
+
+  async markUserAsUnblocked(userId: number): Promise<void> {
+    try {
+      await db
+        .update(users)
+        .set({
+          blockedAt: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, userId));
+      logger.info(`User ${userId} marked as unblocked`);
+    } catch (error) {
+      logger.error(`Error marking user ${userId} as unblocked:`, error);
       throw error;
     }
   }
