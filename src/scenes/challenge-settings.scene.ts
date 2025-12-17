@@ -1,5 +1,6 @@
 import type { Context } from 'grammy';
 import { InlineKeyboard } from 'grammy';
+import { BUTTONS, MESSAGES } from './messages.js';
 import { challengeService } from '../services/challenge.service.js';
 
 export async function handleChallengeSettingsScene(ctx: Context) {
@@ -10,23 +11,22 @@ export async function handleChallengeSettingsScene(ctx: Context) {
   const challenge = await challengeService.getActiveChallenge(userId);
   const remindersEnabled = challenge?.reminderStatus ?? false;
 
-  const messageText = 
-    `Ни шагу назад, продолжительность челленджа не изменить. А вот время напоминаний всегда пожалуйста`;
+  const messageText = MESSAGES.CHALLENGE_SETTINGS.TEXT;
 
   const keyboard = new InlineKeyboard()
-    .text('Изменить часовой пояс', 'change_timezone')
+    .text(BUTTONS.CHANGE_TIMEZONE, 'change_timezone')
     .row()
-    .text('Изменить время уведомлений', 'change_reminder_time')
+    .text(BUTTONS.CHANGE_REMINDER_TIME, 'change_reminder_time')
     .row();
 
   // Добавляем кнопку включения/отключения напоминаний
   if (remindersEnabled) {
-    keyboard.text('🔕 Отключить уведомления', 'disable_reminders');
+    keyboard.text(BUTTONS.DISABLE_REMINDERS, 'disable_reminders');
   } else {
-    keyboard.text('🔔 Включить уведомления', 'enable_reminders');
+    keyboard.text(BUTTONS.ENABLE_REMINDERS, 'enable_reminders');
   }
 
-  keyboard.row().text('К челленджу', 'challenge_stats');
+  keyboard.row().text(BUTTONS.TO_CHALLENGE, 'challenge_stats');
 
   // Если это callback query (нажатие на кнопку), редактируем сообщение
   if (ctx.callbackQuery) {

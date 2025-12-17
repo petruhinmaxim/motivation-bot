@@ -1,6 +1,6 @@
 import { InlineKeyboard } from 'grammy';
 import type { Context } from 'grammy';
-import { BUTTONS } from './messages.js';
+import { BUTTONS, MESSAGES } from './messages.js';
 
 export const challengeStartNotificationKeyboard = new InlineKeyboard()
   .text(BUTTONS.TODAY, 'start_today')
@@ -8,20 +8,18 @@ export const challengeStartNotificationKeyboard = new InlineKeyboard()
   .row()
   .text(BUTTONS.MONDAY, 'start_monday');
 
-const NOTIFICATION_TEXT = 
-  'Тук-тук. Я без звука, чтоб не отвлекать тебя, тем более я не знаю твоего часового пояса. ' +
-  'Понедельник настал, тот самый, который «с понедельника» и, надеюсь, жир не победил. Когда начинаем?';
-
 export async function handleChallengeStartNotificationScene(ctx: Context) {
+  const messageText = MESSAGES.CHALLENGE_START_NOTIFICATION.TEXT;
+
   // Если это callback query (нажатие на кнопку), редактируем сообщение
   if (ctx.callbackQuery) {
-    await ctx.editMessageText(NOTIFICATION_TEXT, {
+    await ctx.editMessageText(messageText, {
       reply_markup: challengeStartNotificationKeyboard,
     });
     await ctx.answerCallbackQuery();
   } else {
     // Если это новое сообщение, отправляем новое
-    await ctx.reply(NOTIFICATION_TEXT, {
+    await ctx.reply(messageText, {
       reply_markup: challengeStartNotificationKeyboard,
     });
   }

@@ -1,5 +1,6 @@
 import type { Context } from 'grammy';
 import { userService } from '../services/user.service.js';
+import { MESSAGE_FUNCTIONS } from './messages.js';
 
 export async function handleEditReminderTimeScene(ctx: Context) {
   const userId = ctx.from?.id;
@@ -11,7 +12,7 @@ export async function handleEditReminderTimeScene(ctx: Context) {
     ? `UTC${user.timezone >= 0 ? '+' : ''}${user.timezone}`
     : 'не указан';
 
-  const messageText = `Твой часовой пояс: ${timezoneText}. Напиши в чат новое время напоминаний, к примеру "14:00"`;
+  const messageText = MESSAGE_FUNCTIONS.EDIT_REMINDER_TIME_TEXT(timezoneText);
 
   // Если это callback query (нажатие на кнопку), редактируем сообщение
   if (ctx.callbackQuery) {

@@ -1,5 +1,6 @@
 import type { Context } from 'grammy';
 import { userService } from '../services/user.service.js';
+import { MESSAGE_FUNCTIONS } from './messages.js';
 
 export async function handleEditTimezoneScene(ctx: Context) {
   const userId = ctx.from?.id;
@@ -11,7 +12,7 @@ export async function handleEditTimezoneScene(ctx: Context) {
     ? `UTC${user.timezone >= 0 ? '+' : ''}${user.timezone}`
     : 'не указан';
 
-  const messageText = `Текущий часовой пояс: ${timezoneText}. Для обновления отправь сообщение в формате "X МСК" в чат`;
+  const messageText = MESSAGE_FUNCTIONS.EDIT_TIMEZONE_TEXT(timezoneText);
 
   // Если это callback query (нажатие на кнопку), редактируем сообщение
   if (ctx.callbackQuery) {

@@ -19,9 +19,9 @@ export async function handleStartScene(ctx: Context) {
 
   // Если есть активный челлендж, добавляем текст и кнопку
   if (activeChallenge) {
-    messageText += '\n\nУ тебя уже активен челлендж. Для перехода нажми на кнопку ниже';
+    messageText += MESSAGES.START.ACTIVE_CHALLENGE;
     keyboard = new InlineKeyboard()
-      .text('К челленджу', 'challenge_stats')
+      .text(BUTTONS.TO_CHALLENGE, 'challenge_stats')
       .row()
       .text(BUTTONS.INFO, 'info');
   }

@@ -1,5 +1,6 @@
 import type { Context } from 'grammy';
 import { InlineKeyboard } from 'grammy';
+import { BUTTONS, MESSAGES, MESSAGE_FUNCTIONS } from './messages.js';
 import { challengeService } from '../services/challenge.service.js';
 
 export async function handleChallengeStatsScene(ctx: Context) {
@@ -10,7 +11,7 @@ export async function handleChallengeStatsScene(ctx: Context) {
   const challenge = await challengeService.getActiveChallenge(userId);
 
   if (!challenge) {
-    await ctx.reply('Челлендж не найден. Начни новый челлендж!');
+    await ctx.reply(MESSAGES.CHALLENGE_STATS.NOT_FOUND);
     return;
   }
 
@@ -27,19 +28,20 @@ export async function handleChallengeStatsScene(ctx: Context) {
     ? challenge.reminderTime.slice(0, 5) // Берем только первые 5 символов (HH:MM)
     : 'отключены';
 
-  const messageText = 
-    `📊 Статистика челленджа\n\n` +
-    `Дата начала челленджа: ${formattedStartDate}\n` +
-    `Количество дней ${challenge.successfulDays} / ${challenge.duration}\n` +
-    `Пропущено дней подряд: ${challenge.daysWithoutWorkout}\n` +
-    `Начало тренировки: ${reminderTimeText}`;
+  const messageText = MESSAGE_FUNCTIONS.CHALLENGE_STATS_TEXT(
+    formattedStartDate,
+    challenge.successfulDays,
+    challenge.duration,
+    challenge.daysWithoutWorkout,
+    reminderTimeText
+  );
 
   const keyboard = new InlineKeyboard()
-    .text('📸 Отправить фото', 'send_photo')
+    .text(BUTTONS.SEND_PHOTO, 'send_photo')
     .row()
-    .text('⚙️ Настройки челленджа', 'challenge_settings')
+    .text(BUTTONS.CHALLENGE_SETTINGS, 'challenge_settings')
     .row()
-    .text('📋 Правила челленджа', 'challenge_rules');
+    .text(BUTTONS.CHALLENGE_RULES, 'challenge_rules');
 
   // Если это callback query (нажатие на кнопку), редактируем сообщение
   if (ctx.callbackQuery) {

@@ -121,12 +121,12 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         } catch (error: any) {
           // Если у пользователя уже есть активный челлендж
           if (error.message === 'User already has an active challenge') {
-            await ctx.reply('У тебя уже есть активный челлендж. Заверши его или дождись окончания.');
+            await ctx.reply(MESSAGES.CHALLENGE.ALREADY_ACTIVE);
             await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
             await handleChallengeStatsScene(ctx);
           } else {
             logger.error(`Error creating challenge for user ${userId}:`, error);
-            await ctx.reply('Произошла ошибка при создании челленджа. Попробуй еще раз.');
+            await ctx.reply(MESSAGES.CHALLENGE.CREATE_ERROR);
           }
         }
         return;
@@ -184,7 +184,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         // Отключаем напоминания
         await challengeService.disableReminders(userId);
         schedulerService.cancelDailyReminder(userId);
-        await ctx.answerCallbackQuery('Уведомления отключены');
+        await ctx.answerCallbackQuery(MESSAGES.REMINDERS.DISABLED);
         await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_SETTINGS' });
         await handleChallengeSettingsScene(ctx);
         return;
@@ -192,7 +192,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
 
       if (data === 'enable_reminders') {
         // Включаем напоминания (нужно установить время)
-        await ctx.answerCallbackQuery('Сначала установите время уведомлений');
+        await ctx.answerCallbackQuery(MESSAGES.REMINDERS.SET_TIME_FIRST);
         await stateService.sendEvent(userId, { type: 'GO_TO_EDIT_REMINDER_TIME' });
         await handleEditReminderTimeScene(ctx);
         return;
@@ -201,7 +201,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       if (data === 'send_photo') {
         // Отправляем сообщение с просьбой отправить фото
         await ctx.answerCallbackQuery();
-        await ctx.reply('Отправь фото в чат и помни, жир не пройдет!');
+        await ctx.reply(MESSAGES.PHOTO.SEND_REQUEST);
         // Переводим пользователя в сцену ожидания фото
         await stateService.sendEvent(userId, { type: 'GO_TO_WAITING_FOR_PHOTO' });
         return;
@@ -232,7 +232,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           return;
         } else {
           // Не удалось распарсить, просим повторить
-          await ctx.reply('Не удалось распознать часовой пояс. Пожалуйста, отправь сообщение в формате "X МСК", например: "0 МСК" или "+2 МСК"');
+          await ctx.reply(MESSAGES.TIMEZONE.PARSE_ERROR);
           return;
         }
       }
@@ -245,14 +245,14 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           // Сохраняем timezone
           await userService.updateTimezone(userId, timezone);
           // Отправляем уведомление об успехе
-          await ctx.reply('✅ Часовой пояс успешно изменен!');
+          await ctx.reply(MESSAGES.TIMEZONE.UPDATED);
           // Возвращаемся в настройки
           await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_SETTINGS' });
           await handleChallengeSettingsScene(ctx);
           return;
         } else {
           // Не удалось распарсить, просим повторить
-          await ctx.reply('❌ Не удалось распознать часовой пояс. Пожалуйста, отправь сообщение в формате "X МСК", например: "0 МСК" или "+2 МСК"');
+          await ctx.reply(MESSAGES.TIMEZONE.PARSE_ERROR_EDIT);
           return;
         }
       }
@@ -279,7 +279,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           return;
         } else {
           // Не удалось распарсить, просим повторить
-          await ctx.reply('Не удалось распознать время. Пожалуйста, отправь время в формате "HH:MM", например: "14:00" или "09:30"');
+          await ctx.reply(MESSAGES.TIME.PARSE_ERROR);
           return;
         }
       }
@@ -301,14 +301,14 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           }
           
           // Отправляем уведомление об успехе
-          await ctx.reply('✅ Время уведомлений успешно изменено!');
+          await ctx.reply(MESSAGES.TIME.UPDATED);
           // Возвращаемся в настройки
           await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_SETTINGS' });
           await handleChallengeSettingsScene(ctx);
           return;
         } else {
           // Не удалось распарсить, просим повторить
-          await ctx.reply('❌ Не удалось распознать время. Пожалуйста, отправь время в формате "HH:MM", например: "14:00" или "09:30"');
+          await ctx.reply(MESSAGES.TIME.PARSE_ERROR_EDIT);
           return;
         }
       }
@@ -323,7 +323,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       
       if (currentScene !== 'waiting_for_photo') {
         // Если пользователь не нажимал кнопку "Отправить фото", отправляем сообщение и переводим на статистику
-        await ctx.reply('Для загрузки фото нажми на кнопку');
+        await ctx.reply(MESSAGES.PHOTO.CLICK_BUTTON);
         await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
         await handleChallengeStatsScene(ctx);
         return;
@@ -336,13 +336,13 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       // Проверяем, есть ли активный челлендж
       const challenge = await challengeService.getActiveChallenge(userId);
       if (!challenge) {
-        await ctx.reply('У тебя нет активного челленджа. Начни новый челлендж!');
+        await ctx.reply(MESSAGES.CHALLENGE.NOT_ACTIVE);
         return;
       }
 
       // Проверяем, что челлендж активен (не провален)
       if (challenge.status !== 'active') {
-        await ctx.reply('Этот челлендж уже завершен. Начни новый челлендж!');
+        await ctx.reply(MESSAGES.CHALLENGE.ALREADY_COMPLETED);
         await stateService.sendEvent(userId, { type: 'GO_TO_START' });
         await handleStartScene(ctx);
         return;
@@ -353,7 +353,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       
       if (alreadyUploaded) {
         // Если фото уже было загружено сегодня
-        await ctx.reply('Вижу вторую тренировку - огонь. Мы засчитываем одну в день, но тело всё запомнило.');
+        await ctx.reply(MESSAGES.PHOTO.ALREADY_UPLOADED);
         // Возвращаем пользователя в сцену статистики
         await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
         // Отправляем сцену статистики
@@ -390,7 +390,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         await handleChallengeStatsScene(ctx);
       } catch (error) {
         logger.error(`Error processing photo for user ${userId}:`, error);
-        await ctx.reply('Произошла ошибка при обработке фото. Попробуй еще раз.');
+        await ctx.reply(MESSAGES.PHOTO.PROCESS_ERROR);
       }
       return;
     }
@@ -411,7 +411,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
             await missedWorkoutReportService.createReport(challenge.id, ctx.message.text);
             
             // Отправляем подтверждение
-            await ctx.reply('Отчет сохранен');
+            await ctx.reply(MESSAGES.REPORT.SAVED);
             
             // Переводим на сцену статистики
             await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
@@ -419,7 +419,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
             return;
           } catch (error) {
             logger.error(`Error saving missed workout report for user ${userId}:`, error);
-            await ctx.reply('Произошла ошибка при сохранении отчета. Попробуй еще раз.');
+            await ctx.reply(MESSAGES.REPORT.SAVE_ERROR);
             return;
           }
         }
