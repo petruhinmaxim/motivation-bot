@@ -35,6 +35,7 @@ class SchedulerService {
   private tasks = new Map<number, ScheduledTask>();
   private dailyReminders = new Map<number, ScheduledTask>();
   private botApi: Api | null = null;
+  private isRestoring = false; // Флаг для предотвращения параллельных вызовов restoreTasks
 
   /**
    * Устанавливает API бота (вызывается после инициализации бота)
@@ -47,6 +48,13 @@ class SchedulerService {
    * Восстанавливает все запланированные задачи из Redis при старте
    */
   async restoreTasks(): Promise<void> {
+    // Предотвращаем параллельные вызовы
+    if (this.isRestoring) {
+      logger.warn('Restore tasks already in progress, skipping');
+      return;
+    }
+
+    this.isRestoring = true;
     try {
       // Восстанавливаем одноразовые задачи
       const tasksJson = await redis.get(getScheduledTasksKey());
@@ -62,6 +70,12 @@ class SchedulerService {
           if (scheduledTime <= now) {
             logger.warn(`Skipping expired task for user ${task.userId}`);
             await this.removeTaskFromRedis(task.userId);
+            continue;
+          }
+
+          // Проверяем, не запланирована ли уже задача для этого пользователя
+          if (this.tasks.has(task.userId)) {
+            logger.warn(`Task already scheduled for user ${task.userId}, skipping restore`);
             continue;
           }
 
@@ -81,6 +95,8 @@ class SchedulerService {
       await this.restoreDailyReminders();
     } catch (error) {
       logger.error('Error restoring tasks from Redis:', error);
+    } finally {
+      this.isRestoring = false;
     }
   }
 
@@ -100,6 +116,12 @@ class SchedulerService {
 
       for (const reminder of reminders) {
         try {
+          // Проверяем, не запланировано ли уже напоминание для этого пользователя
+          if (this.dailyReminders.has(reminder.userId)) {
+            logger.warn(`Daily reminder already scheduled for user ${reminder.userId}, skipping restore`);
+            continue;
+          }
+
           // Проверяем, что челлендж все еще активен и напоминания включены
           const challenge = await challengeService.getActiveChallenge(reminder.userId);
           if (!challenge || !challenge.reminderStatus || !challenge.reminderTime) {
