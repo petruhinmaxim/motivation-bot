@@ -227,21 +227,56 @@ export class ChallengeService {
       if (!hadPhotoYesterday) {
         const newDaysWithoutWorkout = challenge.daysWithoutWorkout + 1;
         
-        // Увеличиваем счетчик дней без тренировки
-        await db
-          .update(challenges)
-          .set({
-            daysWithoutWorkout: newDaysWithoutWorkout,
-            updatedAt: new Date(),
-          })
-          .where(eq(challenges.id, challenge.id));
+        // Используем транзакцию для атомарного обновления и проверки
+        await db.transaction(async (tx) => {
+          // Повторно получаем челлендж в транзакции для проверки актуального состояния
+          const currentChallenge = await tx
+            .select()
+            .from(challenges)
+            .where(
+              and(
+                eq(challenges.userId, userId),
+                eq(challenges.status, 'active'),
+                eq(challenges.id, challenge.id)
+              )
+            )
+            .limit(1);
 
-        logger.info(`Incremented daysWithoutWorkout for user ${userId} to ${newDaysWithoutWorkout} (yesterday: ${yesterdayDate})`);
+          if (currentChallenge.length === 0 || currentChallenge[0].id !== challenge.id) {
+            // Челлендж был изменен или удален, выходим
+            logger.warn(`Challenge state changed for user ${userId} during transaction`);
+            return;
+          }
 
-        // Если достигли 3 дней без тренировки, переводим челлендж в failed
-        if (newDaysWithoutWorkout >= 3) {
-          await this.failChallenge(userId);
-          logger.info(`Challenge failed for user ${userId} after 3 missed days`);
+          // Увеличиваем счетчик дней без тренировки
+          await tx
+            .update(challenges)
+            .set({
+              daysWithoutWorkout: newDaysWithoutWorkout,
+              updatedAt: new Date(),
+            })
+            .where(eq(challenges.id, challenge.id));
+
+          logger.info(`Incremented daysWithoutWorkout for user ${userId} to ${newDaysWithoutWorkout} (yesterday: ${yesterdayDate})`);
+
+          // Если достигли 3 дней без тренировки, переводим челлендж в failed
+          if (newDaysWithoutWorkout >= 3) {
+            await tx
+              .update(challenges)
+              .set({
+                status: 'failed',
+                daysWithoutWorkout: 0,
+                updatedAt: new Date(),
+              })
+              .where(eq(challenges.id, challenge.id));
+
+            logger.info(`Challenge failed for user ${userId} after 3 missed days`);
+          }
+        });
+
+        // Проверяем, был ли челлендж переведен в failed
+        const updatedChallenge = await this.getActiveChallenge(userId);
+        if (!updatedChallenge || updatedChallenge.status === 'failed') {
           return true;
         }
       } else {

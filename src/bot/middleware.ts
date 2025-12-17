@@ -191,6 +191,14 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       }
 
       if (data === 'enable_reminders') {
+        // Проверяем, установлен ли часовой пояс
+        const user = await userService.getUser(userId);
+        if (!user || user.timezone === null || user.timezone === undefined) {
+          await ctx.answerCallbackQuery('Сначала установите часовой пояс');
+          await stateService.sendEvent(userId, { type: 'GO_TO_EDIT_TIMEZONE' });
+          await handleEditTimezoneScene(ctx);
+          return;
+        }
         // Включаем напоминания (нужно установить время)
         await ctx.answerCallbackQuery(MESSAGES.REMINDERS.SET_TIME_FIRST);
         await stateService.sendEvent(userId, { type: 'GO_TO_EDIT_REMINDER_TIME' });

@@ -15,6 +15,7 @@ import { handleChallengeStartNotificationScene } from '../scenes/challenge-start
 import { handleChallengeFailedScene } from '../scenes/challenge-failed.scene.js';
 import { challengeService } from './challenge.service.js';
 import { userService } from './user.service.js';
+import { handleTelegramError } from '../utils/telegram-error-handler.js';
 
 interface ScheduledTask {
   userId: number;
@@ -57,11 +58,26 @@ class SchedulerService {
 
   /**
    * Восстанавливает все запланированные задачи из Redis при старте
+   * Использует Redis lock для предотвращения race conditions
    */
   async restoreTasks(): Promise<void> {
-    // Предотвращаем параллельные вызовы
+    // Предотвращаем параллельные вызовы через Redis lock
+    const lockKey = 'scheduler:restore:lock';
+    const lockValue = Date.now().toString();
+    const lockTTL = 60; // 60 секунд
+    
+    // Пытаемся получить блокировку
+    const lockAcquired = await redis.set(lockKey, lockValue, 'EX', lockTTL, 'NX');
+    
+    if (!lockAcquired) {
+      logger.warn('Restore tasks already in progress (lock exists), skipping');
+      return;
+    }
+
+    // Устанавливаем локальный флаг для дополнительной защиты
     if (this.isRestoring) {
-      logger.warn('Restore tasks already in progress, skipping');
+      await redis.del(lockKey);
+      logger.warn('Restore tasks already in progress (local flag), skipping');
       return;
     }
 
@@ -114,6 +130,12 @@ class SchedulerService {
       logger.error('Error restoring tasks from Redis:', error);
     } finally {
       this.isRestoring = false;
+      // Освобождаем блокировку
+      try {
+        await redis.del(lockKey);
+      } catch (error) {
+        logger.error('Error releasing restore lock:', error);
+      }
     }
   }
 
@@ -687,7 +709,17 @@ class SchedulerService {
         this.dailyReminders.delete(userId);
         // Планируем следующее напоминание
         await this.scheduleDailyReminder(userId, reminderTime, timezone);
-      } catch (error) {
+      } catch (error: any) {
+        // Проверяем, не заблокировал ли пользователь бота
+        const shouldCancel = handleTelegramError(error, userId);
+        
+        if (shouldCancel || error?.message === 'USER_BLOCKED_BOT') {
+          logger.info(`User ${userId} blocked the bot, cancelling all reminders and checks`);
+          this.cancelDailyReminder(userId);
+          this.cancelMidnightCheck(userId);
+          return;
+        }
+        
         logger.error(`Error in daily reminder for user ${userId}:`, error);
         this.dailyReminders.delete(userId);
         // Пытаемся запланировать следующее напоминание даже при ошибке
@@ -740,6 +772,12 @@ class SchedulerService {
       await handleChallengeFailedScene(mockContext);
       logger.info(`Challenge failed scene sent to user ${userId}`);
     } catch (error) {
+      const shouldCancel = handleTelegramError(error, userId);
+      if (shouldCancel) {
+        this.cancelDailyReminder(userId);
+        this.cancelMidnightCheck(userId);
+        return;
+      }
       logger.error(`Error sending challenge failed scene to user ${userId}:`, error);
       throw error;
     }
@@ -747,6 +785,9 @@ class SchedulerService {
 
   /**
    * Отправляет ежедневное напоминание пользователю
+   * @param userId - ID пользователя
+   * @param reminderTime - Время напоминания (не используется напрямую, но нужно для сигнатуры)
+   * @param timezone - Часовой пояс (не используется напрямую, но нужно для сигнатуры)
    */
   private async sendDailyReminder(userId: number, reminderTime: string, timezone: number): Promise<void> {
     if (!this.botApi) {
@@ -784,37 +825,88 @@ class SchedulerService {
         const missedWorkoutText = 
           'Вчера ты дал жиру отдохнуть. Поделишься своим отчётом? Отправь его в чат, я сохраню, и по завершению челленджа ты увидишь, где были сложности и как прогрессировал.';
         
-        await this.botApi.sendMessage(userId, missedWorkoutText);
-        logger.info(`Missed workout reminder sent to user ${userId}`);
+        try {
+          await this.botApi.sendMessage(userId, missedWorkoutText);
+          logger.info(`Missed workout reminder sent to user ${userId}`);
+        } catch (error) {
+          const shouldCancel = handleTelegramError(error, userId);
+          if (shouldCancel) {
+            this.cancelDailyReminder(userId);
+            this.cancelMidnightCheck(userId);
+            return;
+          }
+          throw error;
+        }
       } else {
         // Отправляем обычное мотивационное сообщение
         const reminderPhrase = getRandomReminderPhrase();
-        await this.botApi.sendMessage(userId, reminderPhrase);
+        try {
+          await this.botApi.sendMessage(userId, reminderPhrase);
+        } catch (error) {
+          const shouldCancel = handleTelegramError(error, userId);
+          if (shouldCancel) {
+            this.cancelDailyReminder(userId);
+            this.cancelMidnightCheck(userId);
+            return;
+          }
+          throw error;
+        }
 
         // Отправляем сцену статистики челленджа
         // Создаем минимальный контекст для вызова handleChallengeStatsScene
         const mockContext = {
           from: { id: userId },
           reply: async (text: string, options?: any) => {
-            return this.botApi!.sendMessage(userId, text, {
-              ...options,
-              disable_notification: true,
-            });
+            try {
+              return await this.botApi!.sendMessage(userId, text, {
+                ...options,
+                disable_notification: true,
+              });
+            } catch (error) {
+              const shouldCancel = handleTelegramError(error, userId);
+              if (shouldCancel) {
+                throw new Error('USER_BLOCKED_BOT');
+              }
+              throw error;
+            }
           },
           editMessageText: async (text: string, options?: any) => {
             // Для напоминаний отправляем новое сообщение
-            return this.botApi!.sendMessage(userId, text, {
-              ...options,
-              disable_notification: true,
-            });
+            try {
+              return await this.botApi!.sendMessage(userId, text, {
+                ...options,
+                disable_notification: true,
+              });
+            } catch (error) {
+              const shouldCancel = handleTelegramError(error, userId);
+              if (shouldCancel) {
+                throw new Error('USER_BLOCKED_BOT');
+              }
+              throw error;
+            }
           },
         } as any;
 
-        await handleChallengeStatsScene(mockContext);
-
-        logger.info(`Daily reminder sent to user ${userId}`);
+        try {
+          await handleChallengeStatsScene(mockContext);
+          logger.info(`Daily reminder sent to user ${userId}`);
+        } catch (error: any) {
+          const shouldCancel = handleTelegramError(error, userId);
+          if (shouldCancel || error?.message === 'USER_BLOCKED_BOT') {
+            this.cancelDailyReminder(userId);
+            this.cancelMidnightCheck(userId);
+            return;
+          }
+          throw error;
+        }
       }
     } catch (error) {
+      const shouldCancel = handleTelegramError(error, userId);
+      if (shouldCancel) {
+        this.cancelDailyReminder(userId);
+        this.cancelMidnightCheck(userId);
+        return;
+      }
       logger.error(`Error sending daily reminder to user ${userId}:`, error);
       throw error;
     }
@@ -904,22 +996,43 @@ class SchedulerService {
         const mockContext = {
           from: { id: userId },
           reply: async (text: string, options?: any) => {
-            return this.botApi!.sendMessage(userId, text, {
-              ...options,
-              disable_notification: true,
-            });
+            try {
+              return await this.botApi!.sendMessage(userId, text, {
+                ...options,
+                disable_notification: true,
+              });
+            } catch (error) {
+              const shouldCancel = handleTelegramError(error, userId);
+              if (shouldCancel) {
+                throw new Error('USER_BLOCKED_BOT');
+              }
+              throw error;
+            }
           },
           editMessageText: async (text: string, options?: any) => {
             // Для уведомлений отправляем новое сообщение
-            return this.botApi!.sendMessage(userId, text, {
-              ...options,
-              disable_notification: true,
-            });
+            try {
+              return await this.botApi!.sendMessage(userId, text, {
+                ...options,
+                disable_notification: true,
+              });
+            } catch (error) {
+              const shouldCancel = handleTelegramError(error, userId);
+              if (shouldCancel) {
+                throw new Error('USER_BLOCKED_BOT');
+              }
+              throw error;
+            }
           },
         } as any;
 
         await handleChallengeStartNotificationScene(mockContext);
-      } catch (error) {
+      } catch (error: any) {
+        const shouldCancel = handleTelegramError(error, userId);
+        if (shouldCancel || error?.message === 'USER_BLOCKED_BOT') {
+          this.cancelTask(userId);
+          return;
+        }
         logger.error(`Error sending scheduled challenge start notification to user ${userId}:`, error);
       }
     });
@@ -945,22 +1058,43 @@ class SchedulerService {
         const mockContext = {
           from: { id: userId },
           reply: async (text: string, options?: any) => {
-            return this.botApi!.sendMessage(userId, text, {
-              ...options,
-              disable_notification: true,
-            });
+            try {
+              return await this.botApi!.sendMessage(userId, text, {
+                ...options,
+                disable_notification: true,
+              });
+            } catch (error) {
+              const shouldCancel = handleTelegramError(error, userId);
+              if (shouldCancel) {
+                throw new Error('USER_BLOCKED_BOT');
+              }
+              throw error;
+            }
           },
           editMessageText: async (text: string, options?: any) => {
             // Для уведомлений отправляем новое сообщение
-            return this.botApi!.sendMessage(userId, text, {
-              ...options,
-              disable_notification: true,
-            });
+            try {
+              return await this.botApi!.sendMessage(userId, text, {
+                ...options,
+                disable_notification: true,
+              });
+            } catch (error) {
+              const shouldCancel = handleTelegramError(error, userId);
+              if (shouldCancel) {
+                throw new Error('USER_BLOCKED_BOT');
+              }
+              throw error;
+            }
           },
         } as any;
 
         await handleChallengeStartNotificationScene(mockContext);
-      } catch (error) {
+      } catch (error: any) {
+        const shouldCancel = handleTelegramError(error, userId);
+        if (shouldCancel || error?.message === 'USER_BLOCKED_BOT') {
+          this.cancelTask(userId);
+          return;
+        }
         logger.error(`Error sending scheduled challenge start notification to user ${userId}:`, error);
       }
     });

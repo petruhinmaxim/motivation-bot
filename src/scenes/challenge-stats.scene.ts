@@ -11,7 +11,9 @@ export async function handleChallengeStatsScene(ctx: Context) {
   const challenge = await challengeService.getActiveChallenge(userId);
 
   if (!challenge) {
-    await ctx.reply(MESSAGES.CHALLENGE_STATS.NOT_FOUND);
+    const keyboard = new InlineKeyboard()
+      .text(BUTTONS.START_NEW_CHALLENGE, 'begin');
+    await ctx.reply(MESSAGES.CHALLENGE_STATS.NOT_FOUND, { reply_markup: keyboard });
     return;
   }
 
