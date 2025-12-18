@@ -360,14 +360,9 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       // Проверяем, было ли уже загружено фото сегодня
       const alreadyUploaded = await challengeService.hasPhotoUploadedToday(userId, currentDate);
       
+      // Показываем сообщение, если фото уже было загружено сегодня
       if (alreadyUploaded) {
-        // Если фото уже было загружено сегодня
         await ctx.reply(MESSAGES.PHOTO.ALREADY_UPLOADED);
-        // Возвращаем пользователя в сцену статистики
-        await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
-        // Отправляем сцену статистики
-        await handleChallengeStatsScene(ctx);
-        return;
       }
 
       try {
@@ -380,8 +375,13 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         const response = await fetch(fileUrl);
         const imageBuffer = Buffer.from(await response.arrayBuffer());
 
+        // Определяем номер дня для обработки изображения
+        // Если фото уже загружено, используем текущее значение, иначе следующее
+        const dayNumber = alreadyUploaded 
+          ? challenge.successfulDays 
+          : challenge.successfulDays + 1;
+        
         // Обрабатываем изображение
-        const dayNumber = challenge.successfulDays + 1;
         const processedImage = await processImage(imageBuffer, dayNumber, challenge.duration);
 
         // Отправляем обработанное фото
@@ -389,8 +389,10 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           caption: getRandomMotivationalPhrase(),
         });
 
-        // Увеличиваем successfulDays
-        await challengeService.incrementSuccessfulDays(userId, currentDate);
+        // Увеличиваем successfulDays только если это первая загрузка сегодня
+        if (!alreadyUploaded) {
+          await challengeService.incrementSuccessfulDays(userId, currentDate);
+        }
 
         // Возвращаем пользователя в сцену статистики
         await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
