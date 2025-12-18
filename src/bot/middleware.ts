@@ -199,7 +199,23 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           await handleEditTimezoneScene(ctx);
           return;
         }
-        // Включаем напоминания (нужно установить время)
+        
+        // Проверяем, есть ли сохраненное время уведомлений
+        const challenge = await challengeService.getActiveChallenge(userId);
+        if (challenge?.reminderTime) {
+          // Если есть сохраненное время - сразу включаем уведомления
+          // Обрезаем время до формата HH:MM (на случай, если в БД хранится с секундами)
+          const reminderTime = challenge.reminderTime.slice(0, 5);
+          await challengeService.updateReminderTime(userId, reminderTime);
+          await schedulerService.scheduleDailyReminder(userId, reminderTime, user.timezone);
+          await schedulerService.scheduleMidnightCheck(userId, user.timezone);
+          await ctx.answerCallbackQuery('✅ Уведомления включены');
+          await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_SETTINGS' });
+          await handleChallengeSettingsScene(ctx);
+          return;
+        }
+        
+        // Если времени нет - просим ввести
         await ctx.answerCallbackQuery(MESSAGES.REMINDERS.SET_TIME_FIRST);
         await stateService.sendEvent(userId, { type: 'GO_TO_EDIT_REMINDER_TIME' });
         await handleEditReminderTimeScene(ctx);

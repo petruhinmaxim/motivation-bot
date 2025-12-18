@@ -26,9 +26,14 @@ export async function handleChallengeStatsScene(ctx: Context) {
   });
 
   // Форматируем время напоминания (обрезаем секунды, оставляем только HH:MM)
-  const reminderTimeText = challenge.reminderTime 
-    ? challenge.reminderTime.slice(0, 5) // Берем только первые 5 символов (HH:MM)
-    : 'отключены';
+  let reminderTimeText: string;
+  if (challenge.reminderTime) {
+    const time = challenge.reminderTime.slice(0, 5); // Берем только первые 5 символов (HH:MM)
+    // Если уведомления отключены, но время сохранено - показываем с иконкой
+    reminderTimeText = challenge.reminderStatus ? time : `${time} 🔕`;
+  } else {
+    reminderTimeText = 'отключены';
+  }
 
   const messageText = MESSAGE_FUNCTIONS.CHALLENGE_STATS_TEXT(
     formattedStartDate,
