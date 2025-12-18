@@ -329,8 +329,9 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       // Проверяем, ожидаем ли мы фото от этого пользователя (проверяем сцену)
       const currentScene = await stateService.getCurrentScene(userId);
       
-      if (currentScene !== 'waiting_for_photo') {
-        // Если пользователь не нажимал кнопку "Отправить фото", отправляем сообщение и переводим на статистику
+      // Разрешаем обработку фото в challenge_stats и waiting_for_photo
+      if (currentScene !== 'waiting_for_photo' && currentScene !== 'challenge_stats') {
+        // Если пользователь не в сцене статистики или ожидания фото, отправляем сообщение и переводим на статистику
         await ctx.reply(MESSAGES.PHOTO.CLICK_BUTTON);
         await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
         await handleChallengeStatsScene(ctx);
