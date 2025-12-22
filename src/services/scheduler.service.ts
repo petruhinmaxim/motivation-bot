@@ -121,10 +121,10 @@ class SchedulerService {
       // Восстанавливаем ежедневные напоминания
       await this.restoreDailyReminders();
       
-      // Восстанавливаем полночные проверки
+      // Восстанавливаем проверки пропущенных дней (4:00 утра)
       await this.restoreMidnightChecks();
       
-      // Инициализируем полночные проверки для всех активных челленджей, которые еще не запланированы
+      // Инициализируем проверки пропущенных дней для всех активных челленджей, которые еще не запланированы
       await this.initializeMidnightChecksForActiveChallenges();
     } catch (error) {
       logger.error('Error restoring tasks from Redis:', error);
@@ -366,9 +366,9 @@ class SchedulerService {
   }
 
   /**
-   * Получает время следующей полночи в часовом поясе пользователя
+   * Получает время следующего 4:00 утра в часовом поясе пользователя
    * @param timezone - Смещение от UTC в часах
-   * @returns Дата следующей полночи в UTC
+   * @returns Дата следующего 4:00 утра в UTC
    */
   private getNextMidnightTime(timezone: number): Date {
     const now = new Date();
@@ -377,11 +377,11 @@ class SchedulerService {
     const userTimezoneOffset = timezone * 60 * 60 * 1000; // в миллисекундах
     const userTime = new Date(now.getTime() + userTimezoneOffset);
     
-    // Создаем дату с полночью в часовом поясе пользователя
+    // Создаем дату с 4:00 утра в часовом поясе пользователя
     const midnightDate = new Date(userTime);
-    midnightDate.setUTCHours(0, 0, 0, 0);
+    midnightDate.setUTCHours(4, 0, 0, 0);
     
-    // Если полночь уже прошла сегодня, планируем на завтра
+    // Если 4:00 уже прошло сегодня, планируем на завтра
     if (midnightDate <= userTime) {
       midnightDate.setUTCDate(midnightDate.getUTCDate() + 1);
     }
@@ -391,7 +391,7 @@ class SchedulerService {
   }
 
   /**
-   * Планирует полночную проверку для пользователя
+   * Планирует проверку пропущенных дней для пользователя (выполняется в 4:00 утра по местному времени)
    * @param userId - ID пользователя
    * @param timezone - Смещение от UTC в часах
    */
@@ -404,7 +404,7 @@ class SchedulerService {
     const delay = scheduledTime.getTime() - now.getTime();
 
     if (delay <= 0) {
-      logger.warn(`Scheduled midnight time is in the past for user ${userId}, scheduling for tomorrow`);
+      logger.warn(`Scheduled check time (4:00 AM) is in the past for user ${userId}, scheduling for tomorrow`);
       // Если время уже прошло, планируем на завтра
       const tomorrowTime = this.getNextMidnightTime(timezone);
       const tomorrowDelay = tomorrowTime.getTime() - now.getTime();
@@ -416,7 +416,7 @@ class SchedulerService {
   }
 
   /**
-   * Внутренний метод для планирования полночной проверки
+   * Внутренний метод для планирования проверки пропущенных дней (4:00 утра)
    */
   private scheduleMidnightCheckInternal(
     userId: number,
@@ -425,7 +425,7 @@ class SchedulerService {
     delay: number
   ): void {
     logger.info(
-      `Scheduling midnight check for user ${userId} at ${scheduledTime.toISOString()} (in ${Math.round(delay / 1000)}s)`
+      `Scheduling missed days check (4:00 AM) for user ${userId} at ${scheduledTime.toISOString()} (in ${Math.round(delay / 1000)}s)`
     );
 
     const timeoutId = setTimeout(async () => {
@@ -457,7 +457,7 @@ class SchedulerService {
   }
 
   /**
-   * Выполняет полночную проверку для пользователя
+   * Выполняет проверку пропущенных дней для пользователя (вызывается в 4:00 утра по местному времени)
    */
   private async performMidnightCheck(userId: number, timezone: number): Promise<void> {
     try {
@@ -503,7 +503,7 @@ class SchedulerService {
         ttlSeconds > 0 ? ttlSeconds : 86400
       );
 
-      // Добавляем в список всех полночных проверок
+      // Добавляем в список всех проверок пропущенных дней
       const checksKey = getMidnightChecksKey();
       const existingChecksJson = await redis.get(checksKey);
       const existingChecks: MidnightCheckData[] = existingChecksJson ? JSON.parse(existingChecksJson) : [];
@@ -519,7 +519,7 @@ class SchedulerService {
   }
 
   /**
-   * Восстанавливает полночные проверки из Redis
+   * Восстанавливает проверки пропущенных дней (4:00 утра) из Redis
    */
   private async restoreMidnightChecks(): Promise<void> {
     try {
@@ -571,7 +571,7 @@ class SchedulerService {
   }
 
   /**
-   * Удаляет полночную проверку из Redis
+   * Удаляет проверку пропущенных дней из Redis
    */
   private async removeMidnightCheckFromRedis(userId: number): Promise<void> {
     try {
@@ -590,7 +590,7 @@ class SchedulerService {
   }
 
   /**
-   * Отменяет полночную проверку для пользователя
+   * Отменяет проверку пропущенных дней для пользователя
    */
   cancelMidnightCheck(userId: number): void {
     const check = this.midnightChecks.get(userId);
@@ -623,7 +623,7 @@ class SchedulerService {
           continue;
         }
 
-        // Планируем полночную проверку
+        // Планируем проверку пропущенных дней (4:00 утра)
         await this.scheduleMidnightCheck(challenge.userId, user.timezone);
         initializedCount++;
       }

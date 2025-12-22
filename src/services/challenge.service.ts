@@ -87,7 +87,7 @@ export class ChallengeService {
   }
 
   /**
-   * Отключает напоминания для активного челленджа и удаляет время напоминания
+   * Отключает напоминания для активного челленджа (время напоминания сохраняется)
    */
   async disableReminders(userId: number): Promise<void> {
     try {
@@ -100,11 +100,10 @@ export class ChallengeService {
         .update(challenges)
         .set({
           reminderStatus: false,
-          reminderTime: null,
           updatedAt: new Date(),
         })
         .where(eq(challenges.id, challenge.id));
-      logger.info(`Disabled reminders and cleared reminder time for user ${userId}`);
+      logger.info(`Disabled reminders for user ${userId} (reminder time preserved)`);
     } catch (error) {
       logger.error(`Error disabling reminders for user ${userId}:`, error);
       throw error;
@@ -205,7 +204,7 @@ export class ChallengeService {
 
   /**
    * Проверяет и увеличивает счетчик дней без тренировки, если фото не было загружено вчера
-   * Вызывается в полночь по часовому поясу пользователя
+   * Вызывается в 4:00 утра по местному времени пользователя
    * Если daysWithoutWorkout достигает 3, переводит челлендж в статус failed
    * @param userId - ID пользователя
    * @param timezoneOffset - Смещение часового пояса от UTC в часах

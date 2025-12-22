@@ -199,7 +199,23 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           await handleEditTimezoneScene(ctx);
           return;
         }
-        // Включаем напоминания (нужно установить время)
+        
+        // Проверяем, есть ли сохраненное время уведомлений
+        const challenge = await challengeService.getActiveChallenge(userId);
+        if (challenge?.reminderTime) {
+          // Если есть сохраненное время - сразу включаем уведомления
+          // Обрезаем время до формата HH:MM (на случай, если в БД хранится с секундами)
+          const reminderTime = challenge.reminderTime.slice(0, 5);
+          await challengeService.updateReminderTime(userId, reminderTime);
+          await schedulerService.scheduleDailyReminder(userId, reminderTime, user.timezone);
+          await schedulerService.scheduleMidnightCheck(userId, user.timezone);
+          await ctx.answerCallbackQuery('✅ Уведомления включены');
+          await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_SETTINGS' });
+          await handleChallengeSettingsScene(ctx);
+          return;
+        }
+        
+        // Если времени нет - просим ввести
         await ctx.answerCallbackQuery(MESSAGES.REMINDERS.SET_TIME_FIRST);
         await stateService.sendEvent(userId, { type: 'GO_TO_EDIT_REMINDER_TIME' });
         await handleEditReminderTimeScene(ctx);
@@ -329,8 +345,9 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       // Проверяем, ожидаем ли мы фото от этого пользователя (проверяем сцену)
       const currentScene = await stateService.getCurrentScene(userId);
       
-      if (currentScene !== 'waiting_for_photo') {
-        // Если пользователь не нажимал кнопку "Отправить фото", отправляем сообщение и переводим на статистику
+      // Разрешаем обработку фото в challenge_stats и waiting_for_photo
+      if (currentScene !== 'waiting_for_photo' && currentScene !== 'challenge_stats') {
+        // Если пользователь не в сцене статистики или ожидания фото, отправляем сообщение и переводим на статистику
         await ctx.reply(MESSAGES.PHOTO.CLICK_BUTTON);
         await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
         await handleChallengeStatsScene(ctx);
@@ -359,14 +376,9 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       // Проверяем, было ли уже загружено фото сегодня
       const alreadyUploaded = await challengeService.hasPhotoUploadedToday(userId, currentDate);
       
+      // Показываем сообщение, если фото уже было загружено сегодня
       if (alreadyUploaded) {
-        // Если фото уже было загружено сегодня
         await ctx.reply(MESSAGES.PHOTO.ALREADY_UPLOADED);
-        // Возвращаем пользователя в сцену статистики
-        await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
-        // Отправляем сцену статистики
-        await handleChallengeStatsScene(ctx);
-        return;
       }
 
       try {
@@ -379,8 +391,13 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         const response = await fetch(fileUrl);
         const imageBuffer = Buffer.from(await response.arrayBuffer());
 
+        // Определяем номер дня для обработки изображения
+        // Если фото уже загружено, используем текущее значение, иначе следующее
+        const dayNumber = alreadyUploaded 
+          ? challenge.successfulDays 
+          : challenge.successfulDays + 1;
+        
         // Обрабатываем изображение
-        const dayNumber = challenge.successfulDays + 1;
         const processedImage = await processImage(imageBuffer, dayNumber, challenge.duration);
 
         // Отправляем обработанное фото
@@ -388,8 +405,10 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           caption: getRandomMotivationalPhrase(),
         });
 
-        // Увеличиваем successfulDays
-        await challengeService.incrementSuccessfulDays(userId, currentDate);
+        // Увеличиваем successfulDays только если это первая загрузка сегодня
+        if (!alreadyUploaded) {
+          await challengeService.incrementSuccessfulDays(userId, currentDate);
+        }
 
         // Возвращаем пользователя в сцену статистики
         await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
