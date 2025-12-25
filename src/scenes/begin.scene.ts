@@ -15,12 +15,14 @@ export async function handleBeginScene(ctx: Context) {
   if (ctx.callbackQuery) {
     await ctx.editMessageText(messageText, {
       reply_markup: beginKeyboard,
+      parse_mode: "HTML",
     });
     await ctx.answerCallbackQuery();
   } else {
     // Если это новое сообщение, отправляем новое
     await ctx.reply(messageText, {
       reply_markup: beginKeyboard,
+      parse_mode: "HTML",
     });
   }
 }

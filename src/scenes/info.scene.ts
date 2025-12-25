@@ -12,12 +12,14 @@ export async function handleInfoScene(ctx: Context) {
   if (ctx.callbackQuery) {
     await ctx.editMessageText(messageText, {
       reply_markup: infoKeyboard,
+      parse_mode: "HTML",
     });
     await ctx.answerCallbackQuery();
   } else {
     // Если это новое сообщение, отправляем новое
     await ctx.reply(messageText, {
       reply_markup: infoKeyboard,
+      parse_mode: "HTML",
     });
   }
 }

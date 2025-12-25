@@ -10,10 +10,16 @@ export async function handleChallengeRulesScene(ctx: Context) {
 
   // Если это callback query (нажатие на кнопку), редактируем сообщение
   if (ctx.callbackQuery) {
-    await ctx.editMessageText(messageText, { reply_markup: keyboard });
+    await ctx.editMessageText(messageText, { 
+      reply_markup: keyboard,
+      parse_mode: "HTML",
+    });
     await ctx.answerCallbackQuery();
   } else {
     // Если это новое сообщение, отправляем новое
-    await ctx.reply(messageText, { reply_markup: keyboard });
+    await ctx.reply(messageText, { 
+      reply_markup: keyboard,
+      parse_mode: "HTML",
+    });
   }
 }
