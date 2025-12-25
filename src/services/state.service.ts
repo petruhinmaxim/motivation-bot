@@ -34,8 +34,9 @@ export class StateService {
           } else if (savedState === 'begin') {
             actor.send({ type: 'GO_TO_BEGIN' });
           } else if (savedState === 'duration') {
+            // Если пользователь был в duration, переводим на timezone (челлендж уже создан)
             actor.send({ type: 'GO_TO_BEGIN' });
-            actor.send({ type: 'GO_TO_DURATION' });
+            actor.send({ type: 'GO_TO_TIMEZONE' });
           } else if (savedState === 'tomorrow') {
             actor.send({ type: 'GO_TO_BEGIN' });
             actor.send({ type: 'GO_TO_TOMORROW' });
@@ -44,16 +45,13 @@ export class StateService {
             actor.send({ type: 'GO_TO_MONDAY' });
           } else if (savedState === 'timezone') {
             actor.send({ type: 'GO_TO_BEGIN' });
-            actor.send({ type: 'GO_TO_DURATION' });
             actor.send({ type: 'GO_TO_TIMEZONE' });
           } else if (savedState === 'reminder_time') {
             actor.send({ type: 'GO_TO_BEGIN' });
-            actor.send({ type: 'GO_TO_DURATION' });
             actor.send({ type: 'GO_TO_TIMEZONE' });
             actor.send({ type: 'GO_TO_REMINDER_TIME' });
           } else if (savedState === 'challenge_rules') {
             actor.send({ type: 'GO_TO_BEGIN' });
-            actor.send({ type: 'GO_TO_DURATION' });
             actor.send({ type: 'GO_TO_TIMEZONE' });
             actor.send({ type: 'GO_TO_REMINDER_TIME' });
             actor.send({ type: 'GO_TO_CHALLENGE_RULES' });

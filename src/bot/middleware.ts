@@ -10,7 +10,6 @@ import {
   handleStartScene,
   handleInfoScene,
   handleBeginScene,
-  handleDurationScene,
   handleTomorrowScene,
   handleMondayScene,
   handleTimezoneScene,
@@ -88,8 +87,25 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       if (data === 'start_today') {
         // Отменяем таймер бездействия при выходе со сцены begin
         idleTimerService.cancelIdleTimer(userId);
-        await stateService.sendEvent(userId, { type: 'GO_TO_DURATION' });
-        await handleDurationScene(ctx);
+        
+        try {
+          // Создаем новый челлендж с продолжительностью 30 дней
+          await challengeService.createOrUpdateChallenge(userId, 30);
+          
+          // Переходим к сцене выбора часового пояса
+          await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+          await handleTimezoneScene(ctx);
+        } catch (error: any) {
+          // Если у пользователя уже есть активный челлендж
+          if (error.message === 'User already has an active challenge') {
+            await ctx.reply(MESSAGES.CHALLENGE.ALREADY_ACTIVE);
+            await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
+            await handleChallengeStatsScene(ctx);
+          } else {
+            logger.error(`Error creating challenge for user ${userId}:`, error);
+            await ctx.reply(MESSAGES.CHALLENGE.CREATE_ERROR);
+          }
+        }
         return;
       }
 
@@ -116,9 +132,25 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         schedulerService.cancelTask(userId);
         // Отменяем таймер бездействия при выходе со сцены begin
         idleTimerService.cancelIdleTimer(userId);
-        // Открываем сцену выбора продолжительности
-        await stateService.sendEvent(userId, { type: 'GO_TO_DURATION' });
-        await handleDurationScene(ctx);
+        
+        try {
+          // Создаем новый челлендж с продолжительностью 30 дней
+          await challengeService.createOrUpdateChallenge(userId, 30);
+          
+          // Переходим к сцене выбора часового пояса
+          await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+          await handleTimezoneScene(ctx);
+        } catch (error: any) {
+          // Если у пользователя уже есть активный челлендж
+          if (error.message === 'User already has an active challenge') {
+            await ctx.reply(MESSAGES.CHALLENGE.ALREADY_ACTIVE);
+            await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
+            await handleChallengeStatsScene(ctx);
+          } else {
+            logger.error(`Error creating challenge for user ${userId}:`, error);
+            await ctx.reply(MESSAGES.CHALLENGE.CREATE_ERROR);
+          }
+        }
         return;
       }
 
@@ -127,19 +159,10 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         schedulerService.cancelTask(userId);
         // Отменяем таймер бездействия при выходе со сцены begin
         idleTimerService.cancelIdleTimer(userId);
-        // Открываем сцену выбора продолжительности
-        await stateService.sendEvent(userId, { type: 'GO_TO_DURATION' });
-        await handleDurationScene(ctx);
-        return;
-      }
-
-      if (data === 'duration_30' || data === 'duration_60' || data === 'duration_90') {
-        // Определяем продолжительность челленджа
-        const duration = data === 'duration_30' ? 30 : data === 'duration_60' ? 60 : 90;
         
         try {
-          // Создаем новый челлендж
-          await challengeService.createOrUpdateChallenge(userId, duration);
+          // Создаем новый челлендж с продолжительностью 30 дней
+          await challengeService.createOrUpdateChallenge(userId, 30);
           
           // Переходим к сцене выбора часового пояса
           await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
@@ -164,14 +187,6 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         return;
       }
 
-      if (data === 'postpone_start') {
-        // Возвращаемся на сцену выбора старта челленджа
-        await stateService.sendEvent(userId, { type: 'GO_TO_BEGIN' });
-        // Запускаем таймер бездействия при возврате на сцену begin
-        idleTimerService.startIdleTimer(userId);
-        await handleBeginScene(ctx);
-        return;
-      }
 
       if (data === 'challenge_stats') {
         // Переходим к сцене статистики челленджа
