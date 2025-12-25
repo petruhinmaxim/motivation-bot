@@ -40,11 +40,21 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
     // Сохраняем/обновляем пользователя в БД
     await userService.saveOrUpdateUser(ctx.from);
 
-    // Проверяем текущую сцену и перезапускаем таймер бездействия, если пользователь на сцене begin
+    // Проверяем текущую сцену и управляем общим таймером бездействия для процесса регистрации
     const currentScene = await stateService.getCurrentScene(userId);
-    if (currentScene === 'begin') {
-      // Перезапускаем таймер при любом взаимодействии на сцене begin
-      idleTimerService.startIdleTimer(userId);
+    if (idleTimerService.isRegistrationScene(currentScene)) {
+      // Если пользователь на сцене регистрации и есть активный таймер - перезапускаем (взаимодействие)
+      // Если таймера нет - запускаем новый
+      if (idleTimerService.hasActiveTimer(userId)) {
+        // Перезапускаем таймер при взаимодействии на сцене регистрации
+        idleTimerService.startIdleTimer(userId, currentScene);
+      } else {
+        // Запускаем новый таймер
+        idleTimerService.startIdleTimer(userId, currentScene);
+      }
+    } else {
+      // Если пользователь не на сцене регистрации - отменяем таймер
+      idleTimerService.cancelIdleTimer(userId);
     }
 
     // Обрабатываем команду /start
@@ -78,26 +88,35 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
 
       if (data === 'begin') {
         await stateService.sendEvent(userId, { type: 'GO_TO_BEGIN' });
-        // Запускаем таймер бездействия при входе на сцену begin
-        idleTimerService.startIdleTimer(userId);
+        // Если таймер уже активен - обновляем сцену, иначе запускаем новый
+        if (idleTimerService.hasActiveTimer(userId)) {
+          idleTimerService.updateScene(userId, 'begin');
+        } else {
+          idleTimerService.startIdleTimer(userId, 'begin');
+        }
         await handleBeginScene(ctx);
         return;
       }
 
       if (data === 'start_today') {
-        // Отменяем таймер бездействия при выходе со сцены begin
-        idleTimerService.cancelIdleTimer(userId);
-        
         try {
           // Создаем новый челлендж с продолжительностью 30 дней
           await challengeService.createOrUpdateChallenge(userId, 30);
           
           // Переходим к сцене выбора часового пояса
           await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+          // Обновляем сцену в таймере (переход между сценами регистрации - таймер продолжает идти)
+          if (idleTimerService.hasActiveTimer(userId)) {
+            idleTimerService.updateScene(userId, 'timezone');
+          } else {
+            idleTimerService.startIdleTimer(userId, 'timezone');
+          }
           await handleTimezoneScene(ctx);
         } catch (error: any) {
           // Если у пользователя уже есть активный челлендж
           if (error.message === 'User already has an active challenge') {
+            // Отменяем таймер при выходе из процесса регистрации
+            idleTimerService.cancelIdleTimer(userId);
             await ctx.reply(MESSAGES.CHALLENGE.ALREADY_ACTIVE);
             await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
             await handleChallengeStatsScene(ctx);
@@ -130,8 +149,6 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       if (data === 'start_now_tomorrow') {
         // Отменяем запланированное напоминание
         schedulerService.cancelTask(userId);
-        // Отменяем таймер бездействия при выходе со сцены begin
-        idleTimerService.cancelIdleTimer(userId);
         
         try {
           // Создаем новый челлендж с продолжительностью 30 дней
@@ -139,10 +156,18 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           
           // Переходим к сцене выбора часового пояса
           await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+          // Обновляем сцену в таймере (переход между сценами регистрации - таймер продолжает идти)
+          if (idleTimerService.hasActiveTimer(userId)) {
+            idleTimerService.updateScene(userId, 'timezone');
+          } else {
+            idleTimerService.startIdleTimer(userId, 'timezone');
+          }
           await handleTimezoneScene(ctx);
         } catch (error: any) {
           // Если у пользователя уже есть активный челлендж
           if (error.message === 'User already has an active challenge') {
+            // Отменяем таймер при выходе из процесса регистрации
+            idleTimerService.cancelIdleTimer(userId);
             await ctx.reply(MESSAGES.CHALLENGE.ALREADY_ACTIVE);
             await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
             await handleChallengeStatsScene(ctx);
@@ -157,8 +182,6 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       if (data === 'start_now_monday') {
         // Отменяем запланированное напоминание
         schedulerService.cancelTask(userId);
-        // Отменяем таймер бездействия при выходе со сцены begin
-        idleTimerService.cancelIdleTimer(userId);
         
         try {
           // Создаем новый челлендж с продолжительностью 30 дней
@@ -166,10 +189,18 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           
           // Переходим к сцене выбора часового пояса
           await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+          // Обновляем сцену в таймере (переход между сценами регистрации - таймер продолжает идти)
+          if (idleTimerService.hasActiveTimer(userId)) {
+            idleTimerService.updateScene(userId, 'timezone');
+          } else {
+            idleTimerService.startIdleTimer(userId, 'timezone');
+          }
           await handleTimezoneScene(ctx);
         } catch (error: any) {
           // Если у пользователя уже есть активный челлендж
           if (error.message === 'User already has an active challenge') {
+            // Отменяем таймер при выходе из процесса регистрации
+            idleTimerService.cancelIdleTimer(userId);
             await ctx.reply(MESSAGES.CHALLENGE.ALREADY_ACTIVE);
             await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
             await handleChallengeStatsScene(ctx);
@@ -296,6 +327,12 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           await userService.updateTimezone(userId, timezone);
           // Переходим к сцене выбора времени напоминаний
           await stateService.sendEvent(userId, { type: 'GO_TO_REMINDER_TIME' });
+          // Обновляем сцену в таймере (переход между сценами регистрации - таймер продолжает идти)
+          if (idleTimerService.hasActiveTimer(userId)) {
+            idleTimerService.updateScene(userId, 'reminder_time');
+          } else {
+            idleTimerService.startIdleTimer(userId, 'reminder_time');
+          }
           await handleReminderTimeScene(ctx);
           return;
         } else {
@@ -340,6 +377,9 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
             // Планируем полночную проверку
             await schedulerService.scheduleMidnightCheck(userId, user.timezone);
           }
+          
+          // Отменяем таймер бездействия при выходе из процесса регистрации
+          idleTimerService.cancelIdleTimer(userId);
           
           // Переходим к сцене правил челленджа
           await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_RULES' });

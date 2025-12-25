@@ -2,14 +2,19 @@ import type { Api } from 'grammy';
 import logger from '../utils/logger.js';
 import redis from '../redis/client.js';
 import { getIdleTimerKey } from '../redis/keys.js';
-import { handleBeginScene } from '../scenes/begin.scene.js';
+import { handleBeginScene, handleTimezoneScene, handleReminderTimeScene } from '../scenes/index.js';
 import { handleTelegramError } from '../utils/telegram-error-handler.js';
 import { MESSAGES } from '../scenes/messages.js';
+import type { Scene } from '../state/types.js';
+
+// Сцены процесса регистрации
+const REGISTRATION_SCENES: Scene[] = ['begin', 'timezone', 'reminder_time'];
 
 interface IdleTimer {
   userId: number;
   timeoutId: NodeJS.Timeout;
   scheduledTime: Date;
+  scene: Scene; // Текущая сцена регистрации
 }
 
 class IdleTimerService {
@@ -25,17 +30,30 @@ class IdleTimerService {
   }
 
   /**
-   * Запускает таймер бездействия для пользователя на сцене begin
-   * @param userId - ID пользователя
+   * Проверяет, является ли сцена частью процесса регистрации
    */
-  startIdleTimer(userId: number): void {
+  isRegistrationScene(scene: Scene): boolean {
+    return REGISTRATION_SCENES.includes(scene);
+  }
+
+  /**
+   * Запускает или перезапускает таймер бездействия для пользователя на сцене регистрации
+   * @param userId - ID пользователя
+   * @param scene - Текущая сцена регистрации
+   */
+  startIdleTimer(userId: number, scene: Scene): void {
+    if (!this.isRegistrationScene(scene)) {
+      logger.warn(`Attempted to start idle timer for non-registration scene: ${scene}`);
+      return;
+    }
+
     // Отменяем предыдущий таймер, если есть
     this.cancelIdleTimer(userId);
 
     const scheduledTime = new Date(Date.now() + this.IDLE_TIMEOUT_MS);
 
     logger.info(
-      `Starting idle timer for user ${userId} on begin scene (will trigger in ${this.IDLE_TIMEOUT_MS / 1000}s)`
+      `Starting idle timer for user ${userId} on ${scene} scene (will trigger in ${this.IDLE_TIMEOUT_MS / 1000}s)`
     );
 
     const timeoutId = setTimeout(async () => {
@@ -55,10 +73,39 @@ class IdleTimerService {
       userId,
       timeoutId,
       scheduledTime,
+      scene,
     });
 
     // Сохраняем в Redis
-    this.saveTimerToRedis(userId, scheduledTime);
+    this.saveTimerToRedis(userId, scheduledTime, scene);
+  }
+
+  /**
+   * Обновляет сцену в таймере без перезапуска таймера
+   * Используется при переходах между сценами регистрации
+   * @param userId - ID пользователя
+   * @param scene - Новая сцена регистрации
+   */
+  updateScene(userId: number, scene: Scene): void {
+    if (!this.isRegistrationScene(scene)) {
+      logger.warn(`Attempted to update idle timer with non-registration scene: ${scene}`);
+      return;
+    }
+
+    const timer = this.timers.get(userId);
+    if (timer) {
+      timer.scene = scene;
+      logger.info(`Updated idle timer scene for user ${userId} to ${scene}`);
+      // Обновляем в Redis
+      this.saveTimerToRedis(userId, timer.scheduledTime, scene);
+    }
+  }
+
+  /**
+   * Проверяет, активен ли таймер для пользователя
+   */
+  hasActiveTimer(userId: number): boolean {
+    return this.timers.has(userId);
   }
 
   /**
@@ -77,7 +124,7 @@ class IdleTimerService {
 
   /**
    * Обрабатывает срабатывание таймера бездействия
-   * Отправляет сообщение "Эй жир победил!" и повторно показывает сцену begin
+   * Отправляет сообщение "Эй жир победил!" и повторно показывает текущую сцену регистрации
    */
   private async handleIdleTimeout(userId: number): Promise<void> {
     if (!this.botApi) {
@@ -85,11 +132,19 @@ class IdleTimerService {
       return;
     }
 
+    const timer = this.timers.get(userId);
+    if (!timer) {
+      logger.warn(`No active timer found for user ${userId} during timeout handling`);
+      return;
+    }
+
+    const scene = timer.scene;
+
     try {
       // Отправляем сообщение "Эй жир победил!"
       await this.botApi.sendMessage(userId, MESSAGES.IDLE.TIMEOUT_MESSAGE);
 
-      // Повторно показываем сцену begin
+      // Создаем mock context для показа сцены
       const mockContext = {
         from: { id: userId },
         reply: async (text: string, options?: any) => {
@@ -121,8 +176,16 @@ class IdleTimerService {
         },
       } as any;
 
-      await handleBeginScene(mockContext);
-      logger.info(`Idle timeout handled for user ${userId}: sent message and begin scene`);
+      // Показываем соответствующую сцену
+      if (scene === 'begin') {
+        await handleBeginScene(mockContext);
+      } else if (scene === 'timezone') {
+        await handleTimezoneScene(mockContext);
+      } else if (scene === 'reminder_time') {
+        await handleReminderTimeScene(mockContext);
+      }
+
+      logger.info(`Idle timeout handled for user ${userId}: sent message and ${scene} scene`);
     } catch (error: any) {
       const shouldCancel = handleTelegramError(error, userId);
       if (shouldCancel || error?.message === 'USER_BLOCKED_BOT') {
@@ -137,11 +200,12 @@ class IdleTimerService {
   /**
    * Сохраняет таймер в Redis
    */
-  private async saveTimerToRedis(userId: number, scheduledTime: Date): Promise<void> {
+  private async saveTimerToRedis(userId: number, scheduledTime: Date, scene: Scene): Promise<void> {
     try {
       const timerData = {
         userId,
         scheduledTime: scheduledTime.toISOString(),
+        scene,
       };
 
       const ttlSeconds = Math.ceil((scheduledTime.getTime() - Date.now()) / 1000) + 60; // TTL = время до выполнения + 1 минута
