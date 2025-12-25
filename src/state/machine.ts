@@ -50,6 +50,9 @@ export const botMachine = setup({
         context.scene = 'info';
       },
       on: {
+        GO_TO_CHALLENGE_STATS: {
+          target: 'challenge_stats',
+        },
         GO_BACK: {
           target: 'start',
         },
@@ -173,6 +176,9 @@ export const botMachine = setup({
         },
         GO_TO_WAITING_FOR_PHOTO: {
           target: 'waiting_for_photo',
+        },
+        GO_TO_INFO: {
+          target: 'info',
         },
         GO_BACK: {
           target: 'challenge_rules',
