@@ -3,6 +3,7 @@ import { InputFile } from 'grammy';
 import { stateService } from '../services/state.service.js';
 import { userService } from '../services/user.service.js';
 import { challengeService } from '../services/challenge.service.js';
+import { idleTimerService } from '../services/idle-timer.service.js';
 import { parseTimezone } from '../utils/timezone-parser.js';
 import logger from '../utils/logger.js';
 import {
@@ -40,8 +41,17 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
     // Сохраняем/обновляем пользователя в БД
     await userService.saveOrUpdateUser(ctx.from);
 
+    // Проверяем текущую сцену и перезапускаем таймер бездействия, если пользователь на сцене begin
+    const currentScene = await stateService.getCurrentScene(userId);
+    if (currentScene === 'begin') {
+      // Перезапускаем таймер при любом взаимодействии на сцене begin
+      idleTimerService.startIdleTimer(userId);
+    }
+
     // Обрабатываем команду /start
     if (ctx.message?.text === '/start') {
+      // Отменяем таймер бездействия при переходе на start
+      idleTimerService.cancelIdleTimer(userId);
       await stateService.sendEvent(userId, { type: 'GO_TO_START' });
       await handleStartScene(ctx);
       return;
@@ -52,6 +62,10 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       const data = ctx.callbackQuery.data;
 
       if (data === 'back') {
+        // Отменяем таймер бездействия при выходе со сцены begin
+        if (currentScene === 'begin') {
+          idleTimerService.cancelIdleTimer(userId);
+        }
         await stateService.sendEvent(userId, { type: 'GO_TO_START' });
         await handleStartScene(ctx);
         return;
@@ -65,17 +79,23 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
 
       if (data === 'begin') {
         await stateService.sendEvent(userId, { type: 'GO_TO_BEGIN' });
+        // Запускаем таймер бездействия при входе на сцену begin
+        idleTimerService.startIdleTimer(userId);
         await handleBeginScene(ctx);
         return;
       }
 
       if (data === 'start_today') {
+        // Отменяем таймер бездействия при выходе со сцены begin
+        idleTimerService.cancelIdleTimer(userId);
         await stateService.sendEvent(userId, { type: 'GO_TO_DURATION' });
         await handleDurationScene(ctx);
         return;
       }
 
       if (data === 'start_tomorrow') {
+        // Отменяем таймер бездействия при выходе со сцены begin
+        idleTimerService.cancelIdleTimer(userId);
         await stateService.sendEvent(userId, { type: 'GO_TO_TOMORROW' });
         await handleTomorrowScene(ctx);
         schedulerService.scheduleTomorrowDuration(userId);
@@ -83,6 +103,8 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       }
 
       if (data === 'start_monday') {
+        // Отменяем таймер бездействия при выходе со сцены begin
+        idleTimerService.cancelIdleTimer(userId);
         await stateService.sendEvent(userId, { type: 'GO_TO_MONDAY' });
         await handleMondayScene(ctx);
         schedulerService.scheduleMondayDuration(userId);
@@ -92,6 +114,8 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       if (data === 'start_now_tomorrow') {
         // Отменяем запланированное напоминание
         schedulerService.cancelTask(userId);
+        // Отменяем таймер бездействия при выходе со сцены begin
+        idleTimerService.cancelIdleTimer(userId);
         // Открываем сцену выбора продолжительности
         await stateService.sendEvent(userId, { type: 'GO_TO_DURATION' });
         await handleDurationScene(ctx);
@@ -101,6 +125,8 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       if (data === 'start_now_monday') {
         // Отменяем запланированное напоминание
         schedulerService.cancelTask(userId);
+        // Отменяем таймер бездействия при выходе со сцены begin
+        idleTimerService.cancelIdleTimer(userId);
         // Открываем сцену выбора продолжительности
         await stateService.sendEvent(userId, { type: 'GO_TO_DURATION' });
         await handleDurationScene(ctx);
@@ -141,6 +167,8 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       if (data === 'postpone_start') {
         // Возвращаемся на сцену выбора старта челленджа
         await stateService.sendEvent(userId, { type: 'GO_TO_BEGIN' });
+        // Запускаем таймер бездействия при возврате на сцену begin
+        idleTimerService.startIdleTimer(userId);
         await handleBeginScene(ctx);
         return;
       }
@@ -234,6 +262,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
 
     // Обрабатываем текстовые сообщения в зависимости от текущей сцены
     if (ctx.message?.text && ctx.message.text !== '/start') {
+      // currentScene уже получен выше, но получаем снова для актуальности
       const currentScene = await stateService.getCurrentScene(userId);
       
       // Если пользователь ожидал фото, но отправил текст, возвращаем в статистику
