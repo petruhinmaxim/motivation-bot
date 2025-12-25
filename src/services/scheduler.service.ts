@@ -1,4 +1,5 @@
 import type { Api } from 'grammy';
+import { InputFile } from 'grammy';
 import logger from '../utils/logger.js';
 import redis from '../redis/client.js';
 import { 
@@ -16,6 +17,7 @@ import { handleChallengeFailedScene } from '../scenes/challenge-failed.scene.js'
 import { challengeService } from './challenge.service.js';
 import { userService } from './user.service.js';
 import { handleTelegramError } from '../utils/telegram-error-handler.js';
+import { getMissedDayImagePath } from '../utils/missed-days-images.js';
 
 interface ScheduledTask {
   userId: number;
@@ -826,8 +828,20 @@ class SchedulerService {
           'Вчера ты дал жиру отдохнуть. Поделишься своим отчётом? Отправь его в чат, я сохраню, и по завершению челленджа ты увидишь, где были сложности и как прогрессировал.';
         
         try {
-          await this.botApi.sendMessage(userId, missedWorkoutText);
-          logger.info(`Missed workout reminder sent to user ${userId}`);
+          // Пытаемся отправить фото для пропущенного дня
+          try {
+            const imagePath = getMissedDayImagePath(challenge.daysWithoutWorkout);
+            const photo = new InputFile(imagePath);
+            await this.botApi.sendPhoto(userId, photo, {
+              caption: missedWorkoutText,
+            });
+            logger.info(`Missed workout reminder with photo sent to user ${userId} (day ${challenge.daysWithoutWorkout})`);
+          } catch (photoError) {
+            // Если не удалось отправить фото, отправляем только текст
+            logger.warn(`Failed to send missed day photo for user ${userId}, sending text only:`, photoError);
+            await this.botApi.sendMessage(userId, missedWorkoutText);
+            logger.info(`Missed workout reminder (text only) sent to user ${userId}`);
+          }
         } catch (error) {
           const shouldCancel = handleTelegramError(error, userId);
           if (shouldCancel) {
