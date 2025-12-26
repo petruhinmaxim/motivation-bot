@@ -8,7 +8,7 @@ import logger from './logger.js';
 const fontPath = resolve(process.cwd(), 'assets/fonts/vintage-culture-font.ttf');
 
 /**
- * Обрабатывает изображение: добавляет текст в формате "Jiroboy" (верхняя строка) и "Day X/30" (нижняя строка) в верхний правый угол
+ * Обрабатывает изображение: добавляет текст в формате "Jiroboy" (верхняя строка) и "Day X/30" (нижняя строка) по центру в верхней части
  * @param imageBuffer - Буфер изображения
  * @param dayNumber - Номер дня (successfulDays + 1)
  * @param totalDays - Общее количество дней (duration)
@@ -45,12 +45,10 @@ export async function processImage(
     
     // Загружаем кастомный шрифт и конвертируем в base64
     let fontBase64 = '';
-    let fontFamily = 'Arial, sans-serif';
     
     try {
       const fontBuffer = readFileSync(fontPath);
       fontBase64 = fontBuffer.toString('base64');
-      fontFamily = 'VintageCulture';
     } catch (error) {
       logger.warn('Could not load custom font, using Arial fallback:', error);
     }
@@ -86,10 +84,11 @@ export async function processImage(
           }
         </style>`;
     
-    // Позиционирование: верхний текст выше, нижний ниже
-    const padding = 20;
-    const topTextY = topFontSize + padding;
-    const bottomTextY = topTextY + bottomFontSize + 5; // Небольшой отступ между строками
+    // Позиционирование: текст по центру горизонтально, в верхней 1/5 части вертикально
+    const centerX = width / 2; // Центр по горизонтали
+    const topAreaY = height / 5; // Верхняя 1/5 часть
+    const topTextY = topAreaY; // Позиция верхнего текста
+    const bottomTextY = topTextY + bottomFontSize + 5; // Нижний текст с небольшим отступом
     
     const svgText = `
       <svg width="${width}" height="${height}">
@@ -97,33 +96,34 @@ export async function processImage(
           ${fontFace}
         </defs>
         <text 
-          x="${width - padding}" 
+          x="${centerX}" 
           y="${topTextY}" 
           class="top-text"
-          text-anchor="end"
+          text-anchor="middle"
           fill="white"
         >${escapedTopText}</text>
         <text 
-          x="${width - padding}" 
+          x="${centerX}" 
           y="${bottomTextY}" 
           class="bottom-text"
-          text-anchor="end"
+          text-anchor="middle"
           fill="white"
         >${escapedBottomText}</text>
       </svg>
     `;
 
-    // Получаем среднюю яркость в верхнем правом углу для определения цвета текста
-    // Берем область примерно 25% от ширины и 12% от высоты в правом верхнем углу (для двух строк текста)
-    const cropWidth = Math.max(10, Math.floor(width * 0.25));
-    const cropHeight = Math.max(10, Math.floor(height * 0.12));
-    const cropLeft = Math.max(0, width - cropWidth);
+    // Получаем среднюю яркость в центральной верхней области для определения цвета текста
+    // Берем область в центре верхней 1/5 части изображения (для двух строк текста)
+    const cropWidth = Math.max(10, Math.floor(width * 0.3)); // 30% от ширины в центре
+    const cropHeight = Math.max(10, Math.floor(height * 0.15)); // 15% от высоты в верхней части
+    const cropLeft = Math.max(0, Math.floor((width - cropWidth) / 2)); // Центрируем по горизонтали
+    const cropTop = 0; // Верхняя часть
     
     let averageBrightness = 128; // Значение по умолчанию
     try {
       const stats = await image
         .clone()
-        .extract({ left: cropLeft, top: 0, width: cropWidth, height: cropHeight })
+        .extract({ left: cropLeft, top: cropTop, width: cropWidth, height: cropHeight })
         .resize(50, 50, { fit: 'inside' })
         .greyscale()
         .stats();
@@ -131,7 +131,7 @@ export async function processImage(
       averageBrightness = stats.channels[0]?.mean || 128;
     } catch (error) {
       // Если не удалось извлечь область, используем значение по умолчанию
-      logger.warn('Could not extract brightness from image corner, using default');
+      logger.warn('Could not extract brightness from image center top area, using default');
     }
     
     // Если изображение темное (яркость < 128), используем белый текст, иначе черный
