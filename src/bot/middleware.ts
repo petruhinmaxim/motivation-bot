@@ -21,6 +21,7 @@ import {
   handleEditReminderTimeScene,
 } from '../scenes/index.js';
 import { missedWorkoutReportService } from '../services/missed-workout-report.service.js';
+import { buttonLogService } from '../services/button-log.service.js';
 import { MESSAGES } from '../scenes/messages.js';
 import { schedulerService } from '../services/scheduler.service.js';
 import { validateTime } from '../utils/time-validator.js';
@@ -70,6 +71,9 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
     // Обрабатываем callback query (нажатия на inline кнопки)
     if (ctx.callbackQuery?.data) {
       const data = ctx.callbackQuery.data;
+
+      // Логируем нажатие кнопки
+      await buttonLogService.logButtonClick(userId, data);
 
       if (data === 'back') {
         // Отменяем таймер бездействия при выходе со сцены begin
