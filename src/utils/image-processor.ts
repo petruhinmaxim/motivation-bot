@@ -8,7 +8,7 @@ import logger from './logger.js';
 const fontPath = resolve(process.cwd(), 'assets/fonts/vintage-culture-font.ttf');
 
 /**
- * Обрабатывает изображение: добавляет текст "Жиробой день X из Y" в верхний правый угол
+ * Обрабатывает изображение: добавляет текст в формате "Jiroboy" (верхняя строка) и "Day X/30" (нижняя строка) в верхний правый угол
  * @param imageBuffer - Буфер изображения
  * @param dayNumber - Номер дня (successfulDays + 1)
  * @param totalDays - Общее количество дней (duration)
@@ -25,17 +25,23 @@ export async function processImage(
     const width = metadata.width || 1000;
     const height = metadata.height || 1000;
 
-    // Текст для наложения (экранируем для XML)
-    const text = `Жиробой день ${dayNumber} из ${totalDays}`;
-    const escapedText = text
+    // Тексты для наложения (экранируем для XML)
+    const topText = 'Jiroboy';
+    const bottomText = `Day ${dayNumber}/${totalDays}`;
+    
+    const escapeXml = (text: string) => text
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&apos;');
     
-    // Размер шрифта (примерно 4% от высоты изображения)
-    const fontSize = Math.max(24, Math.floor(height * 0.04));
+    const escapedTopText = escapeXml(topText);
+    const escapedBottomText = escapeXml(bottomText);
+    
+    // Размеры шрифтов: верхний текст меньше, нижний больше
+    const bottomFontSize = Math.max(32, Math.floor(height * 0.05)); // Больший размер для "Day X/30"
+    const topFontSize = Math.max(20, Math.floor(bottomFontSize * 0.6)); // Меньший размер для "Jiroboy"
     
     // Загружаем кастомный шрифт и конвертируем в base64
     let fontBase64 = '';
@@ -49,26 +55,41 @@ export async function processImage(
       logger.warn('Could not load custom font, using Arial fallback:', error);
     }
     
-    // Создаем SVG с текстом
+    // Создаем SVG с двумя строками текста
     const fontFace = fontBase64 
       ? `<style>
           @font-face {
             font-family: 'VintageCulture';
             src: url('data:font/truetype;charset=utf-8;base64,${fontBase64}') format('truetype');
           }
-          .text {
+          .top-text {
             font-family: 'VintageCulture', Arial, sans-serif;
-            font-size: ${fontSize}px;
+            font-size: ${topFontSize}px;
+            font-weight: bold;
+          }
+          .bottom-text {
+            font-family: 'VintageCulture', Arial, sans-serif;
+            font-size: ${bottomFontSize}px;
             font-weight: bold;
           }
         </style>`
       : `<style>
-          .text {
+          .top-text {
             font-family: Arial, sans-serif;
-            font-size: ${fontSize}px;
+            font-size: ${topFontSize}px;
+            font-weight: bold;
+          }
+          .bottom-text {
+            font-family: Arial, sans-serif;
+            font-size: ${bottomFontSize}px;
             font-weight: bold;
           }
         </style>`;
+    
+    // Позиционирование: верхний текст выше, нижний ниже
+    const padding = 20;
+    const topTextY = topFontSize + padding;
+    const bottomTextY = topTextY + bottomFontSize + 5; // Небольшой отступ между строками
     
     const svgText = `
       <svg width="${width}" height="${height}">
@@ -76,21 +97,26 @@ export async function processImage(
           ${fontFace}
         </defs>
         <text 
-          x="${width - 20}" 
-          y="${fontSize + 20}" 
-          class="text"
+          x="${width - padding}" 
+          y="${topTextY}" 
+          class="top-text"
           text-anchor="end"
           fill="white"
-          stroke="black"
-          stroke-width="2"
-        >${escapedText}</text>
+        >${escapedTopText}</text>
+        <text 
+          x="${width - padding}" 
+          y="${bottomTextY}" 
+          class="bottom-text"
+          text-anchor="end"
+          fill="white"
+        >${escapedBottomText}</text>
       </svg>
     `;
 
     // Получаем среднюю яркость в верхнем правом углу для определения цвета текста
-    // Берем область примерно 20% от ширины и 15% от высоты в правом верхнем углу
-    const cropWidth = Math.max(10, Math.floor(width * 0.2));
-    const cropHeight = Math.max(10, Math.floor(height * 0.15));
+    // Берем область примерно 25% от ширины и 12% от высоты в правом верхнем углу (для двух строк текста)
+    const cropWidth = Math.max(10, Math.floor(width * 0.25));
+    const cropHeight = Math.max(10, Math.floor(height * 0.12));
     const cropLeft = Math.max(0, width - cropWidth);
     
     let averageBrightness = 128; // Значение по умолчанию
@@ -109,16 +135,13 @@ export async function processImage(
     }
     
     // Если изображение темное (яркость < 128), используем белый текст, иначе черный
+    // На фото текст черный без обводки, поэтому используем только fill
     const textColor = averageBrightness < 128 ? 'white' : 'black';
-    const strokeColor = averageBrightness < 128 ? 'black' : 'white';
     
-    // Обновляем SVG с правильным цветом
+    // Обновляем SVG с правильным цветом (убираем обводку, как на фото)
     const svgWithColor = svgText.replace(
-      'fill="white"',
+      /fill="white"/g,
       `fill="${textColor}"`
-    ).replace(
-      'stroke="black"',
-      `stroke="${strokeColor}"`
     );
 
     // Накладываем текст на изображение

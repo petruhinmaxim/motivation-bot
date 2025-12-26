@@ -422,11 +422,8 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       }
     }
 
-    // Обрабатываем фото
-    if (ctx.message?.photo) {
-      const userId = ctx.from.id;
-      
-      // Проверяем, ожидаем ли мы фото от этого пользователя (проверяем сцену)
+    // Вспомогательная функция для обработки изображения
+    async function processImageFromFile(fileId: string, userId: number) {
       const currentScene = await stateService.getCurrentScene(userId);
       
       // Разрешаем обработку фото в challenge_stats и waiting_for_photo
@@ -466,11 +463,10 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       }
 
       try {
-        // Получаем самое большое фото (обычно последнее в массиве)
-        const photo = ctx.message.photo[ctx.message.photo.length - 1];
-        const file = await ctx.api.getFile(photo.file_id);
+        // Получаем файл
+        const file = await ctx.api.getFile(fileId);
         
-        // Скачиваем фото
+        // Скачиваем файл
         const fileUrl = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${file.file_path}`;
         const response = await fetch(fileUrl);
         const imageBuffer = Buffer.from(await response.arrayBuffer());
@@ -500,10 +496,42 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         // Отправляем сцену статистики
         await handleChallengeStatsScene(ctx);
       } catch (error) {
-        logger.error(`Error processing photo for user ${userId}:`, error);
+        logger.error(`Error processing image for user ${userId}:`, error);
         await ctx.reply(MESSAGES.PHOTO.PROCESS_ERROR);
       }
+    }
+
+    // Обрабатываем фото
+    if (ctx.message?.photo) {
+      const userId = ctx.from.id;
+      // Получаем самое большое фото (обычно последнее в массиве)
+      const photo = ctx.message.photo[ctx.message.photo.length - 1];
+      await processImageFromFile(photo.file_id, userId);
       return;
+    }
+
+    // Обрабатываем документы (файлы) - проверяем, что это изображение
+    if (ctx.message?.document) {
+      const userId = ctx.from.id;
+      const document = ctx.message.document;
+      
+      // Проверяем, что файл является изображением по MIME типу
+      const imageMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/bmp'];
+      const isImageByMime = document.mime_type && imageMimeTypes.includes(document.mime_type.toLowerCase());
+      
+      // Проверяем по расширению файла
+      const fileName = document.file_name?.toLowerCase() || '';
+      const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'];
+      const isImageByExtension = imageExtensions.some(ext => fileName.endsWith(ext));
+      
+      if (isImageByMime || isImageByExtension) {
+        await processImageFromFile(document.file_id, userId);
+        return;
+      } else {
+        // Если это не изображение, отправляем сообщение
+        await ctx.reply(MESSAGES.PHOTO.INVALID_FILE);
+        return;
+      }
     }
 
     // Обрабатываем текст как отчет о пропущенной тренировке
