@@ -8,7 +8,7 @@ import logger from './logger.js';
 const fontPath = resolve(process.cwd(), 'assets/fonts/vintage-culture-font.ttf');
 
 /**
- * Обрабатывает изображение: добавляет текст в формате "Jiroboy" (верхняя строка) и "Day X/30" (нижняя строка) по центру в верхней части
+ * Обрабатывает изображение: добавляет текст в формате "Jiroboy" (верхняя строка) и "Day X/30" (нижняя строка) в верхний правый угол
  * @param imageBuffer - Буфер изображения
  * @param dayNumber - Номер дня (successfulDays + 1)
  * @param totalDays - Общее количество дней (duration)
@@ -39,9 +39,48 @@ export async function processImage(
     const escapedTopText = escapeXml(topText);
     const escapedBottomText = escapeXml(bottomText);
     
-    // Размеры шрифтов: верхний текст меньше, нижний больше
-    const bottomFontSize = Math.max(32, Math.floor(height * 0.05)); // Больший размер для "Day X/30"
-    const topFontSize = Math.max(20, Math.floor(bottomFontSize * 0.6)); // Меньший размер для "Jiroboy"
+    // Масштабирование текста в зависимости от размера изображения
+    // Используем среднее геометрическое ширины и высоты для более точного масштабирования
+    // Например: для фото 1000x1000 => imageSize = 1000, для фото 2000x1500 => imageSize ≈ 1732
+    const imageSize = Math.sqrt(width * height);
+    
+    // Диапазоны размеров изображений для масштабирования
+    // Маленькие фото (например, 400x400 и меньше) и большие фото (например, 5000x5000 и больше)
+    const minImageSize = 400;   // Порог для маленьких изображений
+    const maxImageSize = 5000;  // Порог для больших изображений (ограничиваем максимальный размер текста)
+    
+    // Минимальные и максимальные размеры для читаемости
+    const minBottomFontSize = 24;  // Минимум для нижнего текста
+    const maxBottomFontSize = 120; // Максимум для нижнего текста
+    const minTopFontSize = 16;     // Минимум для верхнего текста
+    const maxTopFontSize = 72;     // Максимум для верхнего текста
+    
+    let bottomFontSize: number;
+    let topFontSize: number;
+    
+    // Для очень маленьких изображений используем процент от высоты
+    if (imageSize < minImageSize) {
+      bottomFontSize = Math.max(minBottomFontSize, Math.floor(height * 0.06));
+      topFontSize = Math.max(minTopFontSize, Math.floor(bottomFontSize * 0.65));
+    } 
+    // Для очень больших изображений используем максимальные размеры
+    else if (imageSize > maxImageSize) {
+      bottomFontSize = maxBottomFontSize;
+      topFontSize = maxTopFontSize;
+    } 
+    // Для средних размеров используем линейную интерполяцию
+    else {
+      // Нормализуем размер изображения в диапазон [0, 1]
+      const normalizedSize = (imageSize - minImageSize) / (maxImageSize - minImageSize);
+      
+      // Линейная интерполяция между минимальным и максимальным размером
+      bottomFontSize = Math.round(
+        minBottomFontSize + (maxBottomFontSize - minBottomFontSize) * normalizedSize
+      );
+      topFontSize = Math.round(
+        minTopFontSize + (maxTopFontSize - minTopFontSize) * normalizedSize
+      );
+    }
     
     // Загружаем кастомный шрифт и конвертируем в base64
     let fontBase64 = '';
@@ -84,10 +123,10 @@ export async function processImage(
           }
         </style>`;
     
-    // Позиционирование: текст по центру горизонтально, в верхней 1/5 части вертикально
-    const centerX = width / 2; // Центр по горизонтали
-    const topAreaY = height / 5; // Верхняя 1/5 часть
-    const topTextY = topAreaY; // Позиция верхнего текста
+    // Позиционирование: текст в верхнем правом углу
+    const padding = Math.max(10, Math.floor(width * 0.02)); // Адаптивный отступ (2% от ширины, минимум 10px)
+    const rightX = width - padding; // Позиция по правому краю
+    const topTextY = topFontSize + padding; // Позиция верхнего текста (отступ от верха)
     const bottomTextY = topTextY + bottomFontSize + 5; // Нижний текст с небольшим отступом
     
     const svgText = `
@@ -96,27 +135,27 @@ export async function processImage(
           ${fontFace}
         </defs>
         <text 
-          x="${centerX}" 
+          x="${rightX}" 
           y="${topTextY}" 
           class="top-text"
-          text-anchor="middle"
+          text-anchor="end"
           fill="white"
         >${escapedTopText}</text>
         <text 
-          x="${centerX}" 
+          x="${rightX}" 
           y="${bottomTextY}" 
           class="bottom-text"
-          text-anchor="middle"
+          text-anchor="end"
           fill="white"
         >${escapedBottomText}</text>
       </svg>
     `;
 
-    // Получаем среднюю яркость в центральной верхней области для определения цвета текста
-    // Берем область в центре верхней 1/5 части изображения (для двух строк текста)
-    const cropWidth = Math.max(10, Math.floor(width * 0.3)); // 30% от ширины в центре
+    // Получаем среднюю яркость в верхнем правом углу для определения цвета текста
+    // Берем область примерно 25% от ширины и 15% от высоты в правом верхнем углу (для двух строк текста)
+    const cropWidth = Math.max(10, Math.floor(width * 0.25)); // 25% от ширины в правом углу
     const cropHeight = Math.max(10, Math.floor(height * 0.15)); // 15% от высоты в верхней части
-    const cropLeft = Math.max(0, Math.floor((width - cropWidth) / 2)); // Центрируем по горизонтали
+    const cropLeft = Math.max(0, width - cropWidth); // Правый край
     const cropTop = 0; // Верхняя часть
     
     let averageBrightness = 128; // Значение по умолчанию
@@ -131,7 +170,7 @@ export async function processImage(
       averageBrightness = stats.channels[0]?.mean || 128;
     } catch (error) {
       // Если не удалось извлечь область, используем значение по умолчанию
-      logger.warn('Could not extract brightness from image center top area, using default');
+      logger.warn('Could not extract brightness from image top right corner, using default');
     }
     
     // Если изображение темное (яркость < 128), используем белый текст, иначе черный
