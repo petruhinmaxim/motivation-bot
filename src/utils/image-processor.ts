@@ -1,5 +1,11 @@
 import sharp from 'sharp';
+import { resolve } from 'path';
+import { readFileSync } from 'fs';
 import logger from './logger.js';
+
+// Путь к файлу шрифта относительно корня проекта
+// Используем process.cwd() для работы как в dev, так и в production
+const fontPath = resolve(process.cwd(), 'assets/fonts/vintage-culture-font.ttf');
 
 /**
  * Обрабатывает изображение: добавляет текст "Жиробой день X из Y" в верхний правый угол
@@ -31,17 +37,43 @@ export async function processImage(
     // Размер шрифта (примерно 4% от высоты изображения)
     const fontSize = Math.max(24, Math.floor(height * 0.04));
     
+    // Загружаем кастомный шрифт и конвертируем в base64
+    let fontBase64 = '';
+    let fontFamily = 'Arial, sans-serif';
+    
+    try {
+      const fontBuffer = readFileSync(fontPath);
+      fontBase64 = fontBuffer.toString('base64');
+      fontFamily = 'VintageCulture';
+    } catch (error) {
+      logger.warn('Could not load custom font, using Arial fallback:', error);
+    }
+    
     // Создаем SVG с текстом
+    const fontFace = fontBase64 
+      ? `<style>
+          @font-face {
+            font-family: 'VintageCulture';
+            src: url('data:font/truetype;charset=utf-8;base64,${fontBase64}') format('truetype');
+          }
+          .text {
+            font-family: 'VintageCulture', Arial, sans-serif;
+            font-size: ${fontSize}px;
+            font-weight: bold;
+          }
+        </style>`
+      : `<style>
+          .text {
+            font-family: Arial, sans-serif;
+            font-size: ${fontSize}px;
+            font-weight: bold;
+          }
+        </style>`;
+    
     const svgText = `
       <svg width="${width}" height="${height}">
         <defs>
-          <style>
-            .text {
-              font-family: Arial, sans-serif;
-              font-size: ${fontSize}px;
-              font-weight: bold;
-            }
-          </style>
+          ${fontFace}
         </defs>
         <text 
           x="${width - 20}" 
