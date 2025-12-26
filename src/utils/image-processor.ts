@@ -210,7 +210,10 @@ export async function processImage(
 
     // Если изображение темное (яркость < 128), используем белый текст, иначе черный
     const textColor = averageBrightness < 128 ? 'white' : 'black';
-    logger.debug(`Text color: ${textColor} (brightness: ${averageBrightness.toFixed(2)})`);
+    // Цвет тени: инвертированный от цвета текста (белый текст -> черная тень, черный текст -> белая тень)
+    const shadowColor = textColor === 'white' ? 'black' : 'white';
+    const shadowOpacity = 0.7; // 70% прозрачность
+    logger.debug(`Text color: ${textColor}, shadow color: ${shadowColor} (brightness: ${averageBrightness.toFixed(2)})`);
 
     // Позиционирование: "Day X/30" по центру, "Jiroboy" над "30"
     const centerX = width / 2;
@@ -228,6 +231,15 @@ export async function processImage(
     const reduction = topFontSize * 0.1;
     const topTextY = bottomTextY - baseOffset + reduction;
 
+    // Вычисляем параметры теней для каждого текста
+    // Смещение под 45 градусов: dx = dy, используем процент от размера шрифта (например, 2-3%)
+    const topShadowOffset = Math.max(1, Math.round(topFontSize * 0.025)); // 2.5% от размера шрифта
+    const bottomShadowOffset = Math.max(1, Math.round(bottomFontSize * 0.025));
+    
+    // Размытие: 5% от высоты текста (размера шрифта)
+    const topShadowBlur = Math.max(0.5, topFontSize * 0.05);
+    const bottomShadowBlur = Math.max(0.5, bottomFontSize * 0.05);
+
     // Конвертируем текст в SVG paths
     // Для "Jiroboy" - центрируем относительно "30"
     const topTextPath = textToPath(topText, topFontSize, numberCenterX, topTextY);
@@ -235,16 +247,46 @@ export async function processImage(
     // Для "Day X/30" - центрируем по центру изображения
     const bottomTextPath = textToPath(bottomText, bottomFontSize, centerX, bottomTextY);
 
-    // Создаем SVG с путями вместо текста
+    // Создаем SVG с путями и тенями
+    // Используем фильтры для создания теней
     const svgText = `<?xml version="1.0" encoding="UTF-8"?>
       <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <!-- Фильтр тени для верхнего текста -->
+          <filter id="shadowTop" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur in="SourceAlpha" stdDeviation="${topShadowBlur}" result="blur"/>
+            <feOffset in="blur" dx="${topShadowOffset}" dy="${topShadowOffset}" result="offsetblur"/>
+            <feFlood flood-color="${shadowColor}" flood-opacity="${shadowOpacity}" result="flood"/>
+            <feComposite in="flood" in2="offsetblur" operator="in" result="shadow"/>
+            <feMerge>
+              <feMergeNode in="shadow"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+          
+          <!-- Фильтр тени для нижнего текста -->
+          <filter id="shadowBottom" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur in="SourceAlpha" stdDeviation="${bottomShadowBlur}" result="blur"/>
+            <feOffset in="blur" dx="${bottomShadowOffset}" dy="${bottomShadowOffset}" result="offsetblur"/>
+            <feFlood flood-color="${shadowColor}" flood-opacity="${shadowOpacity}" result="flood"/>
+            <feComposite in="flood" in2="offsetblur" operator="in" result="shadow"/>
+            <feMerge>
+              <feMergeNode in="shadow"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
         <g fill="${textColor}">
-          ${topTextPath}
-          ${bottomTextPath}
+          <g filter="url(#shadowTop)">
+            ${topTextPath}
+          </g>
+          <g filter="url(#shadowBottom)">
+            ${bottomTextPath}
+          </g>
         </g>
       </svg>`;
 
-    logger.info(`Text rendered as SVG paths: topText="${topText}" (${topFontSize}px), bottomText="${bottomText}" (${bottomFontSize}px), color=${textColor}`);
+    logger.info(`Text rendered as SVG paths: topText="${topText}" (${topFontSize}px), bottomText="${bottomText}" (${bottomFontSize}px), color=${textColor}, shadow=${shadowColor} (opacity=${shadowOpacity}, blur: top=${topShadowBlur.toFixed(1)}px, bottom=${bottomShadowBlur.toFixed(1)}px, offset: top=${topShadowOffset}px, bottom=${bottomShadowOffset}px)`);
 
     // Накладываем текст на изображение через Sharp
     const processedImage = await image
