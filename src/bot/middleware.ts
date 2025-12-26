@@ -28,6 +28,7 @@ import { processImage } from '../utils/image-processor.js';
 import { getRandomMotivationalPhrase } from '../utils/motivational-phrases.js';
 import { getCurrentDateString } from '../utils/date-utils.js';
 import { env } from '../utils/env.js';
+import sharp from 'sharp';
 
 export async function stateMiddleware(ctx: Context, next: NextFunction) {
   if (!ctx.from) {
@@ -422,8 +423,43 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       }
     }
 
+    // Вспомогательная функция для валидации изображения
+    async function validateImage(imageBuffer: Buffer): Promise<{ valid: boolean; error?: string }> {
+      try {
+        const image = sharp(imageBuffer);
+        const metadata = await image.metadata();
+        
+        const width = metadata.width || 0;
+        const height = metadata.height || 0;
+        const format = metadata.format;
+        
+        // Проверяем размеры изображения
+        const MIN_SIZE = 100;
+        const MAX_SIZE = 10000;
+        
+        if (width < MIN_SIZE || height < MIN_SIZE) {
+          return { valid: false, error: MESSAGES.PHOTO.INVALID_SIZE };
+        }
+        
+        if (width > MAX_SIZE || height > MAX_SIZE) {
+          return { valid: false, error: MESSAGES.PHOTO.INVALID_SIZE };
+        }
+        
+        // Проверяем формат (только JPEG, PNG, WebP)
+        const allowedFormats = ['jpeg', 'jpg', 'png', 'webp'];
+        if (!format || !allowedFormats.includes(format.toLowerCase())) {
+          return { valid: false, error: MESSAGES.PHOTO.INVALID_FORMAT };
+        }
+        
+        return { valid: true };
+      } catch (error) {
+        logger.error('Error validating image:', error);
+        return { valid: false, error: MESSAGES.PHOTO.INVALID_FORMAT };
+      }
+    }
+
     // Вспомогательная функция для обработки изображения
-    async function processImageFromFile(fileId: string, userId: number) {
+    async function processImageFromFile(fileId: string, userId: number, fileSize?: number) {
       const currentScene = await stateService.getCurrentScene(userId);
       
       // Разрешаем обработку фото в challenge_stats и waiting_for_photo
@@ -463,6 +499,13 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       }
 
       try {
+        // Проверяем размер файла (если передан)
+        const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 МБ в байтах
+        if (fileSize && fileSize > MAX_FILE_SIZE) {
+          await ctx.reply(MESSAGES.PHOTO.FILE_TOO_LARGE);
+          return;
+        }
+        
         // Получаем файл
         const file = await ctx.api.getFile(fileId);
         
@@ -470,6 +513,13 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         const fileUrl = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${file.file_path}`;
         const response = await fetch(fileUrl);
         const imageBuffer = Buffer.from(await response.arrayBuffer());
+        
+        // Валидируем изображение (формат и размеры)
+        const validation = await validateImage(imageBuffer);
+        if (!validation.valid) {
+          await ctx.reply(validation.error || MESSAGES.PHOTO.PROCESS_ERROR);
+          return;
+        }
 
         // Определяем номер дня для обработки изображения
         // Если фото уже загружено, используем текущее значение, иначе следующее
@@ -506,7 +556,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       const userId = ctx.from.id;
       // Получаем самое большое фото (обычно последнее в массиве)
       const photo = ctx.message.photo[ctx.message.photo.length - 1];
-      await processImageFromFile(photo.file_id, userId);
+      await processImageFromFile(photo.file_id, userId, photo.file_size);
       return;
     }
 
@@ -515,21 +565,28 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       const userId = ctx.from.id;
       const document = ctx.message.document;
       
-      // Проверяем, что файл является изображением по MIME типу
-      const imageMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/bmp'];
+      // Проверяем размер файла (максимум 20 МБ)
+      const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 МБ в байтах
+      if (document.file_size && document.file_size > MAX_FILE_SIZE) {
+        await ctx.reply(MESSAGES.PHOTO.FILE_TOO_LARGE);
+        return;
+      }
+      
+      // Проверяем, что файл является изображением по MIME типу (только JPEG, PNG, WebP)
+      const imageMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
       const isImageByMime = document.mime_type && imageMimeTypes.includes(document.mime_type.toLowerCase());
       
-      // Проверяем по расширению файла
+      // Проверяем по расширению файла (только JPEG, PNG, WebP)
       const fileName = document.file_name?.toLowerCase() || '';
-      const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'];
+      const imageExtensions = ['.jpg', '.jpeg', '.png', '.webp'];
       const isImageByExtension = imageExtensions.some(ext => fileName.endsWith(ext));
       
       if (isImageByMime || isImageByExtension) {
-        await processImageFromFile(document.file_id, userId);
+        await processImageFromFile(document.file_id, userId, document.file_size);
         return;
       } else {
-        // Если это не изображение, отправляем сообщение
-        await ctx.reply(MESSAGES.PHOTO.INVALID_FILE);
+        // Если это не изображение или неподдерживаемый формат, отправляем сообщение
+        await ctx.reply(MESSAGES.PHOTO.INVALID_FORMAT);
         return;
       }
     }
