@@ -20,6 +20,7 @@ export const botMachine = setup({
       | { type: 'GO_TO_WAITING_FOR_PHOTO' }
       | { type: 'GO_TO_MISSED_WORKOUT_REPORT' }
       | { type: 'GO_TO_CHALLENGE_FAILED' }
+      | { type: 'GO_TO_FEEDBACK' }
       | { type: 'GO_BACK' },
   },
 }).createMachine({
@@ -180,6 +181,9 @@ export const botMachine = setup({
         GO_TO_INFO: {
           target: 'info',
         },
+        GO_TO_FEEDBACK: {
+          target: 'feedback',
+        },
         GO_BACK: {
           target: 'challenge_rules',
         },
@@ -273,6 +277,19 @@ export const botMachine = setup({
         context.scene = 'challenge_failed';
       },
       on: {
+        GO_TO_START: {
+          target: 'start',
+        },
+      },
+    },
+    feedback: {
+      entry: ({ context }) => {
+        context.scene = 'feedback';
+      },
+      on: {
+        GO_TO_CHALLENGE_STATS: {
+          target: 'challenge_stats',
+        },
         GO_TO_START: {
           target: 'start',
         },

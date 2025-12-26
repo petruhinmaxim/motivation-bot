@@ -44,13 +44,13 @@ export async function handleChallengeStatsScene(ctx: Context) {
   );
 
   const keyboard = new InlineKeyboard()
-    .text(BUTTONS.SEND_PHOTO, 'send_photo')
+    .text(BUTTONS.CHALLENGE_RULES, 'challenge_rules')
+    .text(BUTTONS.INFO, 'info')
     .row()
     .text(BUTTONS.CHALLENGE_SETTINGS, 'challenge_settings')
+    .text(BUTTONS.FEEDBACK, 'feedback')
     .row()
-    .text(BUTTONS.CHALLENGE_RULES, 'challenge_rules')
-    .row()
-    .text(BUTTONS.INFO, 'info');
+    .text(BUTTONS.SEND_PHOTO, 'send_photo');
 
   // Если это callback query (нажатие на кнопку), редактируем сообщение
   if (ctx.callbackQuery) {

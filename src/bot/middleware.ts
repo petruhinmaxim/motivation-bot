@@ -19,8 +19,10 @@ import {
   handleChallengeSettingsScene,
   handleEditTimezoneScene,
   handleEditReminderTimeScene,
+  handleFeedbackScene,
 } from '../scenes/index.js';
 import { missedWorkoutReportService } from '../services/missed-workout-report.service.js';
+import { feedbackService } from '../services/feedback.service.js';
 import { buttonLogService } from '../services/button-log.service.js';
 import { MESSAGES } from '../scenes/messages.js';
 import { schedulerService } from '../services/scheduler.service.js';
@@ -307,6 +309,13 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         await ctx.reply(MESSAGES.PHOTO.SEND_REQUEST);
         // Переводим пользователя в сцену ожидания фото
         await stateService.sendEvent(userId, { type: 'GO_TO_WAITING_FOR_PHOTO' });
+        return;
+      }
+
+      if (data === 'feedback') {
+        // Переходим к сцене обратной связи
+        await stateService.sendEvent(userId, { type: 'GO_TO_FEEDBACK' });
+        await handleFeedbackScene(ctx);
         return;
       }
     }
@@ -599,6 +608,25 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
     // Если пользователь отправил текст (не команду, не фото), и у него есть пропущенные дни
     if (ctx.message?.text && !ctx.message.text.startsWith('/')) {
       const currentScene = await stateService.getCurrentScene(userId);
+      
+      // Обрабатываем обратную связь
+      if (currentScene === 'feedback') {
+        try {
+          await feedbackService.createFeedback(userId, ctx.message.text);
+          
+          // Отправляем подтверждение
+          await ctx.reply(MESSAGES.FEEDBACK.THANKS);
+          
+          // Переводим на сцену статистики
+          await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
+          await handleChallengeStatsScene(ctx);
+          return;
+        } catch (error) {
+          logger.error(`Error saving feedback for user ${userId}:`, error);
+          await ctx.reply(MESSAGES.ERROR.TEXT);
+          return;
+        }
+      }
       
       // Проверяем, что пользователь не в другой специальной сцене
       const specialScenes = ['timezone', 'reminder_time', 'edit_timezone', 'edit_reminder_time', 'waiting_for_photo'];
