@@ -8,7 +8,6 @@ export const botMachine = setup({
       | { type: 'GO_TO_START' }
       | { type: 'GO_TO_INFO' }
       | { type: 'GO_TO_BEGIN' }
-      | { type: 'GO_TO_DURATION' }
       | { type: 'GO_TO_TOMORROW' }
       | { type: 'GO_TO_MONDAY' }
       | { type: 'GO_TO_TIMEZONE' }
@@ -51,6 +50,9 @@ export const botMachine = setup({
         context.scene = 'info';
       },
       on: {
+        GO_TO_CHALLENGE_STATS: {
+          target: 'challenge_stats',
+        },
         GO_BACK: {
           target: 'start',
         },
@@ -64,8 +66,8 @@ export const botMachine = setup({
         context.scene = 'begin';
       },
       on: {
-        GO_TO_DURATION: {
-          target: 'duration',
+        GO_TO_TIMEZONE: {
+          target: 'timezone',
         },
         GO_TO_TOMORROW: {
           target: 'tomorrow',
@@ -81,22 +83,6 @@ export const botMachine = setup({
         },
       },
     },
-    duration: {
-      entry: ({ context }) => {
-        context.scene = 'duration';
-      },
-      on: {
-        GO_TO_TIMEZONE: {
-          target: 'timezone',
-        },
-        GO_BACK: {
-          target: 'begin',
-        },
-        GO_TO_START: {
-          target: 'start',
-        },
-      },
-    },
     tomorrow: {
       entry: ({ context }) => {
         context.scene = 'tomorrow';
@@ -104,9 +90,6 @@ export const botMachine = setup({
       on: {
         GO_TO_TIMEZONE: {
           target: 'timezone',
-        },
-        GO_TO_DURATION: {
-          target: 'duration',
         },
         GO_BACK: {
           target: 'begin',
@@ -123,9 +106,6 @@ export const botMachine = setup({
       on: {
         GO_TO_TIMEZONE: {
           target: 'timezone',
-        },
-        GO_TO_DURATION: {
-          target: 'duration',
         },
         GO_BACK: {
           target: 'begin',
@@ -196,6 +176,9 @@ export const botMachine = setup({
         },
         GO_TO_WAITING_FOR_PHOTO: {
           target: 'waiting_for_photo',
+        },
+        GO_TO_INFO: {
+          target: 'info',
         },
         GO_BACK: {
           target: 'challenge_rules',

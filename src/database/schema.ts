@@ -58,10 +58,26 @@ export const missedWorkoutReportsRelations = relations(missedWorkoutReports, ({ 
   }),
 }));
 
+export const userButtonLogs = pgTable('user_button_logs', {
+  id: serial('id').primaryKey(),
+  userId: bigint('user_id', { mode: 'number' }).notNull().references(() => users.id),
+  buttonName: varchar('button_name', { length: 255 }).notNull(),
+  clickedAt: timestamp('clicked_at').defaultNow().notNull(),
+});
+
+export const userButtonLogsRelations = relations(userButtonLogs, ({ one }) => ({
+  user: one(users, {
+    fields: [userButtonLogs.userId],
+    references: [users.id],
+  }),
+}));
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Challenge = typeof challenges.$inferSelect;
 export type NewChallenge = typeof challenges.$inferInsert;
 export type MissedWorkoutReport = typeof missedWorkoutReports.$inferSelect;
 export type NewMissedWorkoutReport = typeof missedWorkoutReports.$inferInsert;
+export type UserButtonLog = typeof userButtonLogs.$inferSelect;
+export type NewUserButtonLog = typeof userButtonLogs.$inferInsert;
 

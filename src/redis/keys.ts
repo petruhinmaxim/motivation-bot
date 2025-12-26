@@ -17,3 +17,6 @@ export const getPhotoUploadKey = (userId: number, date: string): string => `phot
 export const getMidnightChecksKey = (): string => 'scheduler:midnight_checks';
 export const getMidnightCheckDataKey = (userId: number): string => `scheduler:midnight_check:${userId}`;
 
+// Ключи для таймеров бездействия
+export const getIdleTimerKey = (userId: number): string => `idle_timer:${userId}`;
+

@@ -3,13 +3,13 @@ import { InputFile } from 'grammy';
 import { stateService } from '../services/state.service.js';
 import { userService } from '../services/user.service.js';
 import { challengeService } from '../services/challenge.service.js';
+import { idleTimerService } from '../services/idle-timer.service.js';
 import { parseTimezone } from '../utils/timezone-parser.js';
 import logger from '../utils/logger.js';
 import {
   handleStartScene,
   handleInfoScene,
   handleBeginScene,
-  handleDurationScene,
   handleTomorrowScene,
   handleMondayScene,
   handleTimezoneScene,
@@ -21,6 +21,7 @@ import {
   handleEditReminderTimeScene,
 } from '../scenes/index.js';
 import { missedWorkoutReportService } from '../services/missed-workout-report.service.js';
+import { buttonLogService } from '../services/button-log.service.js';
 import { MESSAGES } from '../scenes/messages.js';
 import { schedulerService } from '../services/scheduler.service.js';
 import { validateTime } from '../utils/time-validator.js';
@@ -28,6 +29,7 @@ import { processImage } from '../utils/image-processor.js';
 import { getRandomMotivationalPhrase } from '../utils/motivational-phrases.js';
 import { getCurrentDateString } from '../utils/date-utils.js';
 import { env } from '../utils/env.js';
+import sharp from 'sharp';
 
 export async function stateMiddleware(ctx: Context, next: NextFunction) {
   if (!ctx.from) {
@@ -40,8 +42,27 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
     // Сохраняем/обновляем пользователя в БД
     await userService.saveOrUpdateUser(ctx.from);
 
+    // Проверяем текущую сцену и управляем общим таймером бездействия для процесса регистрации
+    const currentScene = await stateService.getCurrentScene(userId);
+    if (idleTimerService.isRegistrationScene(currentScene)) {
+      // Если пользователь на сцене регистрации и есть активный таймер - перезапускаем (взаимодействие)
+      // Если таймера нет - запускаем новый
+      if (idleTimerService.hasActiveTimer(userId)) {
+        // Перезапускаем таймер при взаимодействии на сцене регистрации
+        idleTimerService.startIdleTimer(userId, currentScene);
+      } else {
+        // Запускаем новый таймер
+        idleTimerService.startIdleTimer(userId, currentScene);
+      }
+    } else {
+      // Если пользователь не на сцене регистрации - отменяем таймер
+      idleTimerService.cancelIdleTimer(userId);
+    }
+
     // Обрабатываем команду /start
     if (ctx.message?.text === '/start') {
+      // Отменяем таймер бездействия при переходе на start
+      idleTimerService.cancelIdleTimer(userId);
       await stateService.sendEvent(userId, { type: 'GO_TO_START' });
       await handleStartScene(ctx);
       return;
@@ -51,7 +72,14 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
     if (ctx.callbackQuery?.data) {
       const data = ctx.callbackQuery.data;
 
+      // Логируем нажатие кнопки
+      await buttonLogService.logButtonClick(userId, data);
+
       if (data === 'back') {
+        // Отменяем таймер бездействия при выходе со сцены begin
+        if (currentScene === 'begin') {
+          idleTimerService.cancelIdleTimer(userId);
+        }
         await stateService.sendEvent(userId, { type: 'GO_TO_START' });
         await handleStartScene(ctx);
         return;
@@ -65,17 +93,49 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
 
       if (data === 'begin') {
         await stateService.sendEvent(userId, { type: 'GO_TO_BEGIN' });
+        // Если таймер уже активен - обновляем сцену, иначе запускаем новый
+        if (idleTimerService.hasActiveTimer(userId)) {
+          idleTimerService.updateScene(userId, 'begin');
+        } else {
+          idleTimerService.startIdleTimer(userId, 'begin');
+        }
         await handleBeginScene(ctx);
         return;
       }
 
       if (data === 'start_today') {
-        await stateService.sendEvent(userId, { type: 'GO_TO_DURATION' });
-        await handleDurationScene(ctx);
+        try {
+          // Создаем новый челлендж с продолжительностью 30 дней
+          await challengeService.createOrUpdateChallenge(userId, 30);
+          
+          // Переходим к сцене выбора часового пояса
+          await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+          // Обновляем сцену в таймере (переход между сценами регистрации - таймер продолжает идти)
+          if (idleTimerService.hasActiveTimer(userId)) {
+            idleTimerService.updateScene(userId, 'timezone');
+          } else {
+            idleTimerService.startIdleTimer(userId, 'timezone');
+          }
+          await handleTimezoneScene(ctx);
+        } catch (error: any) {
+          // Если у пользователя уже есть активный челлендж
+          if (error.message === 'User already has an active challenge') {
+            // Отменяем таймер при выходе из процесса регистрации
+            idleTimerService.cancelIdleTimer(userId);
+            await ctx.reply(MESSAGES.CHALLENGE.ALREADY_ACTIVE);
+            await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
+            await handleChallengeStatsScene(ctx);
+          } else {
+            logger.error(`Error creating challenge for user ${userId}:`, error);
+            await ctx.reply(MESSAGES.CHALLENGE.CREATE_ERROR);
+          }
+        }
         return;
       }
 
       if (data === 'start_tomorrow') {
+        // Отменяем таймер бездействия при выходе со сцены begin
+        idleTimerService.cancelIdleTimer(userId);
         await stateService.sendEvent(userId, { type: 'GO_TO_TOMORROW' });
         await handleTomorrowScene(ctx);
         schedulerService.scheduleTomorrowDuration(userId);
@@ -83,6 +143,8 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       }
 
       if (data === 'start_monday') {
+        // Отменяем таймер бездействия при выходе со сцены begin
+        idleTimerService.cancelIdleTimer(userId);
         await stateService.sendEvent(userId, { type: 'GO_TO_MONDAY' });
         await handleMondayScene(ctx);
         schedulerService.scheduleMondayDuration(userId);
@@ -92,35 +154,58 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       if (data === 'start_now_tomorrow') {
         // Отменяем запланированное напоминание
         schedulerService.cancelTask(userId);
-        // Открываем сцену выбора продолжительности
-        await stateService.sendEvent(userId, { type: 'GO_TO_DURATION' });
-        await handleDurationScene(ctx);
+        
+        try {
+          // Создаем новый челлендж с продолжительностью 30 дней
+          await challengeService.createOrUpdateChallenge(userId, 30);
+          
+          // Переходим к сцене выбора часового пояса
+          await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+          // Обновляем сцену в таймере (переход между сценами регистрации - таймер продолжает идти)
+          if (idleTimerService.hasActiveTimer(userId)) {
+            idleTimerService.updateScene(userId, 'timezone');
+          } else {
+            idleTimerService.startIdleTimer(userId, 'timezone');
+          }
+          await handleTimezoneScene(ctx);
+        } catch (error: any) {
+          // Если у пользователя уже есть активный челлендж
+          if (error.message === 'User already has an active challenge') {
+            // Отменяем таймер при выходе из процесса регистрации
+            idleTimerService.cancelIdleTimer(userId);
+            await ctx.reply(MESSAGES.CHALLENGE.ALREADY_ACTIVE);
+            await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
+            await handleChallengeStatsScene(ctx);
+          } else {
+            logger.error(`Error creating challenge for user ${userId}:`, error);
+            await ctx.reply(MESSAGES.CHALLENGE.CREATE_ERROR);
+          }
+        }
         return;
       }
 
       if (data === 'start_now_monday') {
         // Отменяем запланированное напоминание
         schedulerService.cancelTask(userId);
-        // Открываем сцену выбора продолжительности
-        await stateService.sendEvent(userId, { type: 'GO_TO_DURATION' });
-        await handleDurationScene(ctx);
-        return;
-      }
-
-      if (data === 'duration_30' || data === 'duration_60' || data === 'duration_90') {
-        // Определяем продолжительность челленджа
-        const duration = data === 'duration_30' ? 30 : data === 'duration_60' ? 60 : 90;
         
         try {
-          // Создаем новый челлендж
-          await challengeService.createOrUpdateChallenge(userId, duration);
+          // Создаем новый челлендж с продолжительностью 30 дней
+          await challengeService.createOrUpdateChallenge(userId, 30);
           
           // Переходим к сцене выбора часового пояса
           await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+          // Обновляем сцену в таймере (переход между сценами регистрации - таймер продолжает идти)
+          if (idleTimerService.hasActiveTimer(userId)) {
+            idleTimerService.updateScene(userId, 'timezone');
+          } else {
+            idleTimerService.startIdleTimer(userId, 'timezone');
+          }
           await handleTimezoneScene(ctx);
         } catch (error: any) {
           // Если у пользователя уже есть активный челлендж
           if (error.message === 'User already has an active challenge') {
+            // Отменяем таймер при выходе из процесса регистрации
+            idleTimerService.cancelIdleTimer(userId);
             await ctx.reply(MESSAGES.CHALLENGE.ALREADY_ACTIVE);
             await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
             await handleChallengeStatsScene(ctx);
@@ -138,12 +223,6 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         return;
       }
 
-      if (data === 'postpone_start') {
-        // Возвращаемся на сцену выбора старта челленджа
-        await stateService.sendEvent(userId, { type: 'GO_TO_BEGIN' });
-        await handleBeginScene(ctx);
-        return;
-      }
 
       if (data === 'challenge_stats') {
         // Переходим к сцене статистики челленджа
@@ -234,6 +313,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
 
     // Обрабатываем текстовые сообщения в зависимости от текущей сцены
     if (ctx.message?.text && ctx.message.text !== '/start') {
+      // currentScene уже получен выше, но получаем снова для актуальности
       const currentScene = await stateService.getCurrentScene(userId);
       
       // Если пользователь ожидал фото, но отправил текст, возвращаем в статистику
@@ -252,6 +332,12 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           await userService.updateTimezone(userId, timezone);
           // Переходим к сцене выбора времени напоминаний
           await stateService.sendEvent(userId, { type: 'GO_TO_REMINDER_TIME' });
+          // Обновляем сцену в таймере (переход между сценами регистрации - таймер продолжает идти)
+          if (idleTimerService.hasActiveTimer(userId)) {
+            idleTimerService.updateScene(userId, 'reminder_time');
+          } else {
+            idleTimerService.startIdleTimer(userId, 'reminder_time');
+          }
           await handleReminderTimeScene(ctx);
           return;
         } else {
@@ -297,6 +383,9 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
             await schedulerService.scheduleMidnightCheck(userId, user.timezone);
           }
           
+          // Отменяем таймер бездействия при выходе из процесса регистрации
+          idleTimerService.cancelIdleTimer(userId);
+          
           // Переходим к сцене правил челленджа
           await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_RULES' });
           await handleChallengeRulesScene(ctx);
@@ -338,11 +427,43 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       }
     }
 
-    // Обрабатываем фото
-    if (ctx.message?.photo) {
-      const userId = ctx.from.id;
-      
-      // Проверяем, ожидаем ли мы фото от этого пользователя (проверяем сцену)
+    // Вспомогательная функция для валидации изображения
+    async function validateImage(imageBuffer: Buffer): Promise<{ valid: boolean; error?: string }> {
+      try {
+        const image = sharp(imageBuffer);
+        const metadata = await image.metadata();
+        
+        const width = metadata.width || 0;
+        const height = metadata.height || 0;
+        const format = metadata.format;
+        
+        // Проверяем размеры изображения
+        const MIN_SIZE = 100;
+        const MAX_SIZE = 10000;
+        
+        if (width < MIN_SIZE || height < MIN_SIZE) {
+          return { valid: false, error: MESSAGES.PHOTO.INVALID_SIZE };
+        }
+        
+        if (width > MAX_SIZE || height > MAX_SIZE) {
+          return { valid: false, error: MESSAGES.PHOTO.INVALID_SIZE };
+        }
+        
+        // Проверяем формат (только JPEG, PNG, WebP)
+        const allowedFormats = ['jpeg', 'jpg', 'png', 'webp'];
+        if (!format || !allowedFormats.includes(format.toLowerCase())) {
+          return { valid: false, error: MESSAGES.PHOTO.INVALID_FORMAT };
+        }
+        
+        return { valid: true };
+      } catch (error) {
+        logger.error('Error validating image:', error);
+        return { valid: false, error: MESSAGES.PHOTO.INVALID_FORMAT };
+      }
+    }
+
+    // Вспомогательная функция для обработки изображения
+    async function processImageFromFile(fileId: string, userId: number, fileSize?: number) {
       const currentScene = await stateService.getCurrentScene(userId);
       
       // Разрешаем обработку фото в challenge_stats и waiting_for_photo
@@ -382,14 +503,27 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       }
 
       try {
-        // Получаем самое большое фото (обычно последнее в массиве)
-        const photo = ctx.message.photo[ctx.message.photo.length - 1];
-        const file = await ctx.api.getFile(photo.file_id);
+        // Проверяем размер файла (если передан)
+        const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 МБ в байтах
+        if (fileSize && fileSize > MAX_FILE_SIZE) {
+          await ctx.reply(MESSAGES.PHOTO.FILE_TOO_LARGE);
+          return;
+        }
         
-        // Скачиваем фото
+        // Получаем файл
+        const file = await ctx.api.getFile(fileId);
+        
+        // Скачиваем файл
         const fileUrl = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${file.file_path}`;
         const response = await fetch(fileUrl);
         const imageBuffer = Buffer.from(await response.arrayBuffer());
+        
+        // Валидируем изображение (формат и размеры)
+        const validation = await validateImage(imageBuffer);
+        if (!validation.valid) {
+          await ctx.reply(validation.error || MESSAGES.PHOTO.PROCESS_ERROR);
+          return;
+        }
 
         // Определяем номер дня для обработки изображения
         // Если фото уже загружено, используем текущее значение, иначе следующее
@@ -416,10 +550,49 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         // Отправляем сцену статистики
         await handleChallengeStatsScene(ctx);
       } catch (error) {
-        logger.error(`Error processing photo for user ${userId}:`, error);
+        logger.error(`Error processing image for user ${userId}:`, error);
         await ctx.reply(MESSAGES.PHOTO.PROCESS_ERROR);
       }
+    }
+
+    // Обрабатываем фото
+    if (ctx.message?.photo) {
+      const userId = ctx.from.id;
+      // Получаем самое большое фото (обычно последнее в массиве)
+      const photo = ctx.message.photo[ctx.message.photo.length - 1];
+      await processImageFromFile(photo.file_id, userId, photo.file_size);
       return;
+    }
+
+    // Обрабатываем документы (файлы) - проверяем, что это изображение
+    if (ctx.message?.document) {
+      const userId = ctx.from.id;
+      const document = ctx.message.document;
+      
+      // Проверяем размер файла (максимум 20 МБ)
+      const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 МБ в байтах
+      if (document.file_size && document.file_size > MAX_FILE_SIZE) {
+        await ctx.reply(MESSAGES.PHOTO.FILE_TOO_LARGE);
+        return;
+      }
+      
+      // Проверяем, что файл является изображением по MIME типу (только JPEG, PNG, WebP)
+      const imageMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+      const isImageByMime = document.mime_type && imageMimeTypes.includes(document.mime_type.toLowerCase());
+      
+      // Проверяем по расширению файла (только JPEG, PNG, WebP)
+      const fileName = document.file_name?.toLowerCase() || '';
+      const imageExtensions = ['.jpg', '.jpeg', '.png', '.webp'];
+      const isImageByExtension = imageExtensions.some(ext => fileName.endsWith(ext));
+      
+      if (isImageByMime || isImageByExtension) {
+        await processImageFromFile(document.file_id, userId, document.file_size);
+        return;
+      } else {
+        // Если это не изображение или неподдерживаемый формат, отправляем сообщение
+        await ctx.reply(MESSAGES.PHOTO.INVALID_FORMAT);
+        return;
+      }
     }
 
     // Обрабатываем текст как отчет о пропущенной тренировке

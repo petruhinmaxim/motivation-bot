@@ -48,7 +48,9 @@ export async function handleChallengeStatsScene(ctx: Context) {
     .row()
     .text(BUTTONS.CHALLENGE_SETTINGS, 'challenge_settings')
     .row()
-    .text(BUTTONS.CHALLENGE_RULES, 'challenge_rules');
+    .text(BUTTONS.CHALLENGE_RULES, 'challenge_rules')
+    .row()
+    .text(BUTTONS.INFO, 'info');
 
   // Если это callback query (нажатие на кнопку), редактируем сообщение
   if (ctx.callbackQuery) {

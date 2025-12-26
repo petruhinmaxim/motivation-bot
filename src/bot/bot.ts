@@ -3,6 +3,7 @@ import { env } from '../utils/env.js';
 import { stateMiddleware } from './middleware.js';
 import logger from '../utils/logger.js';
 import { schedulerService } from '../services/scheduler.service.js';
+import { idleTimerService } from '../services/idle-timer.service.js';
 import { userService } from '../services/user.service.js';
 
 export const bot = new Bot(env.BOT_TOKEN);
@@ -38,6 +39,9 @@ bot.use(stateMiddleware);
 
 // Инициализируем scheduler service с API бота
 schedulerService.setBotApi(bot.api);
+
+// Инициализируем idle timer service с API бота
+idleTimerService.setBotApi(bot.api);
 
 // Обработка ошибок
 bot.catch((err) => {
