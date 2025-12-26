@@ -20,10 +20,24 @@ export async function processImage(
   totalDays: number
 ): Promise<Buffer> {
   try {
-    const image = sharp(imageBuffer);
+    let image = sharp(imageBuffer);
     const metadata = await image.metadata();
-    const width = metadata.width || 1000;
-    const height = metadata.height || 1000;
+    let width = metadata.width || 1000;
+    let height = metadata.height || 1000;
+
+    // Приводим изображение к вертикальному формату (высота > ширины)
+    // Если изображение горизонтальное, поворачиваем его на 90 градусов
+    if (width > height) {
+      // Поворачиваем изображение на 90 градусов по часовой стрелке
+      image = image.rotate(90);
+      
+      // После поворота ширина и высота меняются местами
+      const tempWidth = width;
+      width = height;
+      height = tempWidth;
+      
+      logger.debug(`Rotated horizontal image to vertical: ${metadata.width}x${metadata.height} -> ${width}x${height}`);
+    }
 
     // Тексты для наложения (экранируем для XML)
     const topText = 'Jiroboy';
