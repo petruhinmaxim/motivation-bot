@@ -45,7 +45,11 @@ idleTimerService.setBotApi(bot.api);
 
 // Обработка ошибок
 bot.catch((err) => {
-  logger.error('Bot error:', err);
+  logger.error('Bot error:', {
+    error: err.error instanceof Error ? err.error.message : String(err.error),
+    stack: err.error instanceof Error ? err.error.stack : undefined,
+    ctx: err.ctx?.from?.id ? { userId: err.ctx.from.id } : undefined,
+  });
 });
 
 logger.info('Bot initialized');

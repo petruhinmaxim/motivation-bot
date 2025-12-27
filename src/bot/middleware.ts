@@ -33,6 +33,9 @@ import { getCurrentDateString } from '../utils/date-utils.js';
 import { env } from '../utils/env.js';
 import sharp from 'sharp';
 
+// Максимальный размер файла для обработки (20 МБ)
+const MAX_FILE_SIZE = 20 * 1024 * 1024;
+
 export async function stateMiddleware(ctx: Context, next: NextFunction) {
   if (!ctx.from) {
     return next();
@@ -512,9 +515,8 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       }
 
       try {
-        // Проверяем размер файла (если передан)
-        const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 МБ в байтах
-        if (fileSize && fileSize > MAX_FILE_SIZE) {
+      // Проверяем размер файла (если передан)
+      if (fileSize && fileSize > MAX_FILE_SIZE) {
           await ctx.reply(MESSAGES.PHOTO.FILE_TOO_LARGE);
           return;
         }
@@ -522,10 +524,28 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         // Получаем файл
         const file = await ctx.api.getFile(fileId);
         
-        // Скачиваем файл
+        // Скачиваем файл с таймаутом
         const fileUrl = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${file.file_path}`;
-        const response = await fetch(fileUrl);
-        const imageBuffer = Buffer.from(await response.arrayBuffer());
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 секунд таймаут
+        
+        try {
+          const response = await fetch(fileUrl, {
+            signal: controller.signal,
+          });
+          
+          if (!response.ok) {
+            throw new Error(`Failed to download file: ${response.status} ${response.statusText}`);
+          }
+          
+          const imageBuffer = Buffer.from(await response.arrayBuffer());
+          clearTimeout(timeoutId);
+          
+          // Дополнительная проверка размера буфера
+          if (imageBuffer.length > MAX_FILE_SIZE) {
+            await ctx.reply(MESSAGES.PHOTO.FILE_TOO_LARGE);
+            return;
+          }
         
         // Валидируем изображение (формат и размеры)
         const validation = await validateImage(imageBuffer);
@@ -534,33 +554,51 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           return;
         }
 
-        // Определяем номер дня для обработки изображения
-        // Если фото уже загружено, используем текущее значение, иначе следующее
-        const dayNumber = alreadyUploaded 
-          ? challenge.successfulDays 
-          : challenge.successfulDays + 1;
-        
-        // Обрабатываем изображение
-        const processedImage = await processImage(imageBuffer, dayNumber, challenge.duration);
+          // Определяем номер дня для обработки изображения
+          // Если фото уже загружено, используем текущее значение, иначе следующее
+          const dayNumber = alreadyUploaded 
+            ? challenge.successfulDays 
+            : challenge.successfulDays + 1;
+          
+          // Обрабатываем изображение
+          const processedImage = await processImage(imageBuffer, dayNumber, challenge.duration);
 
-        // Отправляем обработанное фото
-        await ctx.replyWithPhoto(new InputFile(processedImage, 'photo.jpg'), {
-          caption: getRandomMotivationalPhrase(),
-        });
+          // Отправляем обработанное фото
+          await ctx.replyWithPhoto(new InputFile(processedImage, 'photo.jpg'), {
+            caption: getRandomMotivationalPhrase(),
+          });
 
-        // Увеличиваем successfulDays только если это первая загрузка сегодня
-        if (!alreadyUploaded) {
-          await challengeService.incrementSuccessfulDays(userId, currentDate);
+          // Увеличиваем successfulDays только если это первая загрузка сегодня
+          if (!alreadyUploaded) {
+            await challengeService.incrementSuccessfulDays(userId, currentDate);
+          }
+
+          // Возвращаем пользователя в сцену статистики
+          await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
+          
+          // Отправляем сцену статистики
+          await handleChallengeStatsScene(ctx);
+        } catch (fetchError: any) {
+          clearTimeout(timeoutId);
+          if (fetchError.name === 'AbortError') {
+            logger.error(`Timeout downloading image for user ${userId}`);
+            await ctx.reply('Превышено время ожидания загрузки изображения. Пожалуйста, попробуйте еще раз.');
+          } else {
+            throw fetchError;
+          }
         }
-
-        // Возвращаем пользователя в сцену статистики
-        await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
+      } catch (error: any) {
+        logger.error(`Error processing image for user ${userId}:`, {
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+        });
         
-        // Отправляем сцену статистики
-        await handleChallengeStatsScene(ctx);
-      } catch (error) {
-        logger.error(`Error processing image for user ${userId}:`, error);
-        await ctx.reply(MESSAGES.PHOTO.PROCESS_ERROR);
+        // Более информативное сообщение об ошибке
+        if (error.message?.includes('timeout') || error.message?.includes('Timeout')) {
+          await ctx.reply('Превышено время ожидания обработки изображения. Пожалуйста, попробуйте еще раз.');
+        } else {
+          await ctx.reply(MESSAGES.PHOTO.PROCESS_ERROR);
+        }
       }
     }
 
@@ -569,6 +607,13 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       const userId = ctx.from.id;
       // Получаем самое большое фото (обычно последнее в массиве)
       const photo = ctx.message.photo[ctx.message.photo.length - 1];
+      
+      // Проверяем размер файла
+      if (photo.file_size && photo.file_size > MAX_FILE_SIZE) {
+        await ctx.reply(MESSAGES.PHOTO.FILE_TOO_LARGE);
+        return;
+      }
+      
       await processImageFromFile(photo.file_id, userId, photo.file_size);
       return;
     }
@@ -578,8 +623,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       const userId = ctx.from.id;
       const document = ctx.message.document;
       
-      // Проверяем размер файла (максимум 20 МБ)
-      const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 МБ в байтах
+      // Проверяем размер файла
       if (document.file_size && document.file_size > MAX_FILE_SIZE) {
         await ctx.reply(MESSAGES.PHOTO.FILE_TOO_LARGE);
         return;
@@ -621,9 +665,17 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
           await handleChallengeStatsScene(ctx);
           return;
-        } catch (error) {
+        } catch (error: any) {
           logger.error(`Error saving feedback for user ${userId}:`, error);
-          await ctx.reply(MESSAGES.ERROR.TEXT);
+          
+          // Более информативное сообщение об ошибке валидации
+          if (error.message && error.message.includes('exceeds maximum length')) {
+            await ctx.reply('Текст слишком длинный. Пожалуйста, отправьте более короткое сообщение.');
+          } else if (error.message && error.message.includes('cannot be empty')) {
+            await ctx.reply('Сообщение не может быть пустым.');
+          } else {
+            await ctx.reply(MESSAGES.ERROR.TEXT);
+          }
           return;
         }
       }
@@ -645,9 +697,17 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
             await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
             await handleChallengeStatsScene(ctx);
             return;
-          } catch (error) {
+          } catch (error: any) {
             logger.error(`Error saving missed workout report for user ${userId}:`, error);
-            await ctx.reply(MESSAGES.REPORT.SAVE_ERROR);
+            
+            // Более информативное сообщение об ошибке валидации
+            if (error.message && error.message.includes('exceeds maximum length')) {
+              await ctx.reply('Текст слишком длинный. Пожалуйста, отправьте более короткое сообщение.');
+            } else if (error.message && error.message.includes('cannot be empty')) {
+              await ctx.reply('Сообщение не может быть пустым.');
+            } else {
+              await ctx.reply(MESSAGES.REPORT.SAVE_ERROR);
+            }
             return;
           }
         }
@@ -656,9 +716,21 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
 
     // Если это не команда/кнопка, просто продолжаем
     return next();
-  } catch (error) {
-    logger.error(`Error in state middleware for user ${userId}:`, error);
-    await ctx.reply(MESSAGES.ERROR.TEXT);
+  } catch (error: any) {
+    logger.error(`Error in state middleware for user ${userId}:`, {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      userId,
+    });
+    
+    // Пытаемся отправить сообщение об ошибке, но не блокируем, если это не удастся
+    try {
+      await ctx.reply(MESSAGES.ERROR.TEXT).catch((sendError) => {
+        logger.error(`Failed to send error message to user ${userId}:`, sendError);
+      });
+    } catch (replyError) {
+      logger.error(`Error sending error message to user ${userId}:`, replyError);
+    }
   }
 
   return next();
