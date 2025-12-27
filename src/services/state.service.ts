@@ -33,10 +33,6 @@ export class StateService {
             actor.send({ type: 'GO_TO_INFO' });
           } else if (savedState === 'begin') {
             actor.send({ type: 'GO_TO_BEGIN' });
-          } else if (savedState === 'duration') {
-            // Если пользователь был в duration, переводим на timezone (челлендж уже создан)
-            actor.send({ type: 'GO_TO_BEGIN' });
-            actor.send({ type: 'GO_TO_TIMEZONE' });
           } else if (savedState === 'tomorrow') {
             actor.send({ type: 'GO_TO_BEGIN' });
             actor.send({ type: 'GO_TO_TOMORROW' });
@@ -117,7 +113,7 @@ export class StateService {
     }
   }
 
-  async getCurrentScene(userId: number): Promise<string> {
+  async getCurrentScene(userId: number): Promise<Scene> {
     const actor = await this.getActor(userId);
     const snapshot = actor.getSnapshot();
     return snapshot.context.scene;

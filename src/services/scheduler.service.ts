@@ -791,7 +791,7 @@ class SchedulerService {
    * @param reminderTime - Время напоминания (не используется напрямую, но нужно для сигнатуры)
    * @param timezone - Часовой пояс (не используется напрямую, но нужно для сигнатуры)
    */
-  private async sendDailyReminder(userId: number, reminderTime: string, timezone: number): Promise<void> {
+  private async sendDailyReminder(userId: number, _reminderTime: string, _timezone: number): Promise<void> {
     if (!this.botApi) {
       logger.error('Bot API is not initialized');
       return;
