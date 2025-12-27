@@ -13,8 +13,7 @@ let isShuttingDown = false;
 async function shutdown(signal: string): Promise<void> {
   if (isShuttingDown) {
     logger.warn('Shutdown already in progress, forcing exit...');
-    process.exit(1);Select * from missed_workout_reportsDELETE FROM challenges
-WHERE id = 6
+    process.exit(1);
   }
 
   isShuttingDown = true;
