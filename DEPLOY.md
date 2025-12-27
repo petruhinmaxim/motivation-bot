@@ -49,7 +49,7 @@ sudo apt install docker-compose-plugin -y
 sudo usermod -aG docker $USER
 # Выйдите и войдите снова для применения изменений
 ```
-
+ssh motivationBot@212.41.28.147
 ## Деплой на сервер
 
 ### Вариант 1: Деплой через Docker Compose (рекомендуется)
