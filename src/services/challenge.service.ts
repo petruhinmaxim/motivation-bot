@@ -8,8 +8,46 @@ import { getYesterdayDateString } from '../utils/date-utils.js';
 
 export class ChallengeService {
   /**
+   * Очищает все ключи Redis для загрузки фото пользователя
+   * Используется при создании нового челленджа или провале старого
+   * @param userId - ID пользователя
+   */
+  async clearPhotoUploadKeys(userId: number): Promise<void> {
+    try {
+      // Используем SCAN для поиска всех ключей photo_upload:${userId}:*
+      const pattern = `photo_upload:${userId}:*`;
+      let cursor = '0';
+      let deletedCount = 0;
+
+      do {
+        const [nextCursor, keys] = await redis.scan(
+          cursor,
+          'MATCH',
+          pattern,
+          'COUNT',
+          100
+        );
+        cursor = nextCursor;
+
+        if (keys.length > 0) {
+          await redis.del(...keys);
+          deletedCount += keys.length;
+        }
+      } while (cursor !== '0');
+
+      if (deletedCount > 0) {
+        logger.info(`Cleared ${deletedCount} photo upload keys for user ${userId}`);
+      }
+    } catch (error) {
+      logger.error(`Error clearing photo upload keys for user ${userId}:`, error);
+      // Не пробрасываем ошибку, чтобы не блокировать создание челленджа
+    }
+  }
+
+  /**
    * Создает новый челлендж для пользователя
    * Блокирует создание, если у пользователя уже есть активный челлендж
+   * Очищает все ключи Redis для загрузки фото при создании нового челленджа
    */
   async createOrUpdateChallenge(
     userId: number,
@@ -23,6 +61,10 @@ export class ChallengeService {
       if (activeChallenge) {
         throw new Error('User already has an active challenge');
       }
+
+      // Очищаем все ключи Redis для загрузки фото перед созданием нового челленджа
+      // Это необходимо, чтобы старые ключи не блокировали загрузку фото в новом челлендже
+      await this.clearPhotoUploadKeys(userId);
 
       // Создаем новую запись
       await db.insert(challenges).values({
@@ -129,53 +171,84 @@ export class ChallengeService {
 
   /**
    * Увеличивает successfulDays на 1 и отмечает, что фото было загружено сегодня
+   * Использует атомарную операцию через Redis для предотвращения race conditions
    * @param userId - ID пользователя
    * @param date - Дата в формате YYYY-MM-DD
    * @returns true, если операция успешна, false если фото уже было загружено сегодня
    */
   async incrementSuccessfulDays(userId: number, date: string): Promise<boolean> {
     try {
-      // Проверяем, было ли уже загружено фото сегодня
-      const alreadyUploaded = await this.hasPhotoUploadedToday(userId, date);
-      if (alreadyUploaded) {
+      const key = getPhotoUploadKey(userId, date);
+      
+      // Атомарно проверяем и устанавливаем ключ в Redis для предотвращения race conditions
+      // SET key value NX EX seconds - устанавливает ключ только если его еще нет
+      const result = await redis.set(key, '1', 'EX', 86400, 'NX'); // 86400 секунд = 24 часа
+      
+      // Если ключ уже существует (result === null), значит фото уже было загружено сегодня
+      if (result === null) {
+        logger.debug(`Photo already uploaded today for user ${userId} on ${date}`);
         return false;
       }
 
       // Получаем активный челлендж
       const challenge = await this.getActiveChallenge(userId);
       if (!challenge) {
+        // Если челлендж не найден, удаляем установленный ключ Redis
+        await redis.del(key);
         throw new Error(`Active challenge not found for user ${userId}`);
       }
 
       // Проверяем, что челлендж активен
       if (challenge.status !== 'active') {
+        // Если челлендж не активен, удаляем установленный ключ Redis
+        await redis.del(key);
         throw new Error(`Challenge is not active for user ${userId}`);
       }
 
       // Увеличиваем successfulDays и обнуляем счетчик пропущенных дней
-      await db
-        .update(challenges)
-        .set({
-          successfulDays: challenge.successfulDays + 1,
-          daysWithoutWorkout: 0, // Обнуляем счетчик пропущенных дней после загрузки фото
-          updatedAt: new Date(),
-        })
-        .where(eq(challenges.id, challenge.id));
+      // Используем транзакцию для атомарности операции
+      const newSuccessfulDays = challenge.successfulDays + 1;
+      await db.transaction(async (tx) => {
+        // Повторно получаем челлендж в транзакции для проверки актуального состояния
+        const currentChallenge = await tx
+          .select()
+          .from(challenges)
+          .where(
+            and(
+              eq(challenges.userId, userId),
+              eq(challenges.status, 'active'),
+              eq(challenges.id, challenge.id)
+            )
+          )
+          .limit(1);
 
-      // Отмечаем, что фото было загружено сегодня (ключ истекает через 24 часа)
-      const key = getPhotoUploadKey(userId, date);
-      await redis.setex(key, 86400, '1'); // 86400 секунд = 24 часа
+        if (currentChallenge.length === 0 || currentChallenge[0].id !== challenge.id) {
+          // Челлендж был изменен или удален
+          await redis.del(key);
+          throw new Error(`Challenge state changed for user ${userId} during transaction`);
+        }
 
-      logger.info(`Incremented successfulDays for user ${userId} on ${date}`);
+        await tx
+          .update(challenges)
+          .set({
+            successfulDays: currentChallenge[0].successfulDays + 1,
+            daysWithoutWorkout: 0, // Обнуляем счетчик пропущенных дней после загрузки фото
+            updatedAt: new Date(),
+          })
+          .where(eq(challenges.id, challenge.id));
+      });
+
+      logger.info(`Incremented successfulDays for user ${userId} on ${date} (new value: ${newSuccessfulDays})`);
       return true;
     } catch (error) {
-      logger.error(`Error incrementing successfulDays for user ${userId}:`, error);
+      logger.error(`Error incrementing successfulDays for user ${userId} on ${date}:`, error);
       throw error;
     }
   }
 
   /**
    * Переводит активный челлендж в статус failed
+   * Очищает все ключи Redis для загрузки фото
    * @param userId - ID пользователя
    */
   async failChallenge(userId: number): Promise<void> {
@@ -194,6 +267,10 @@ export class ChallengeService {
           updatedAt: new Date(),
         })
         .where(eq(challenges.id, challenge.id));
+
+      // Очищаем все ключи Redis для загрузки фото при провале челленджа
+      // Это гарантирует, что при создании нового челленджа не будет конфликтов
+      await this.clearPhotoUploadKeys(userId);
 
       logger.info(`Failed challenge ${challenge.id} for user ${userId}`);
     } catch (error) {

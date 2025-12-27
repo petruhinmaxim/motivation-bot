@@ -506,7 +506,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         return;
       }
 
-      // Проверяем, было ли уже загружено фото сегодня
+      // Проверяем, было ли уже загружено фото сегодня (для отображения сообщения)
       const alreadyUploaded = await challengeService.hasPhotoUploadedToday(userId, currentDate);
       
       // Показываем сообщение, если фото уже было загружено сегодня
@@ -554,11 +554,34 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           return;
         }
 
+          // Увеличиваем successfulDays ПЕРЕД обработкой и отправкой фото
+          // Это гарантирует, что если что-то пойдет не так, мы не отправим фото без увеличения счетчика
+          let wasIncremented = false;
+          let updatedChallenge = challenge;
+          
+          if (!alreadyUploaded) {
+            try {
+              wasIncremented = await challengeService.incrementSuccessfulDays(userId, currentDate);
+              if (wasIncremented) {
+                // Получаем обновленный челлендж для правильного расчета номера дня
+                updatedChallenge = await challengeService.getActiveChallenge(userId);
+                if (!updatedChallenge) {
+                  throw new Error('Failed to get updated challenge after increment');
+                }
+                logger.info(`Successfully incremented counter for user ${userId}, new successfulDays: ${updatedChallenge.successfulDays}`);
+              }
+            } catch (incrementError: any) {
+              logger.error(`Failed to increment successfulDays for user ${userId}:`, incrementError);
+              await ctx.reply(MESSAGES.PHOTO.PROCESS_ERROR);
+              return;
+            }
+          }
+
           // Определяем номер дня для обработки изображения
-          // Если фото уже загружено, используем текущее значение, иначе следующее
+          // Если фото уже загружено, используем текущее значение, иначе используем обновленное значение
           const dayNumber = alreadyUploaded 
             ? challenge.successfulDays 
-            : challenge.successfulDays + 1;
+            : updatedChallenge.successfulDays;
           
           // Обрабатываем изображение
           const processedImage = await processImage(imageBuffer, dayNumber, challenge.duration);
@@ -567,11 +590,6 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           await ctx.replyWithPhoto(new InputFile(processedImage, 'photo.jpg'), {
             caption: getRandomMotivationalPhrase(),
           });
-
-          // Увеличиваем successfulDays только если это первая загрузка сегодня
-          if (!alreadyUploaded) {
-            await challengeService.incrementSuccessfulDays(userId, currentDate);
-          }
 
           // Возвращаем пользователя в сцену статистики
           await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
