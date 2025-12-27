@@ -31,6 +31,9 @@ RUN npm ci --only=production && npm cache clean --force
 # Копируем собранные файлы из builder
 COPY --from=builder /app/dist ./dist
 
+# Копируем папку миграций (ВАЖНО!)
+COPY --from=builder /app/src/database/migrations ./src/database/migrations
+
 # Копируем assets (шрифты и изображения)
 COPY --from=builder /app/assets ./assets
 
@@ -53,4 +56,3 @@ EXPOSE 3000
 
 # Команда запуска
 CMD ["node", "dist/index.js"]
-

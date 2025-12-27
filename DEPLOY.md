@@ -57,7 +57,8 @@ ssh motivationBot@212.41.28.147
 1. **Клонируйте репозиторий на сервер:**
 
 ```bash
-git clone <your-repo-url> motivation-bot
+git clone https://github.com/petruhinmaxim/motivation-bot motivation-bot
+
 cd motivation-bot
 ```
 
