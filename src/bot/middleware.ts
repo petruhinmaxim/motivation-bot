@@ -677,7 +677,9 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           await feedbackService.createFeedback(userId, ctx.message.text);
           
           // Отправляем подтверждение
-          await ctx.reply(MESSAGES.FEEDBACK.THANKS);
+          await ctx.reply(MESSAGES.FEEDBACK.THANKS, {
+            parse_mode: 'HTML',
+          });
           
           // Переводим на сцену статистики
           await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
