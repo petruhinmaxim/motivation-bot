@@ -141,7 +141,7 @@ export const MESSAGE_FUNCTIONS = {
   CHALLENGE_STATS_TEXT: (startDate: string, successfulDays: number, duration: number, daysWithoutWorkout: number, reminderTime: string) =>
     `📊 Статистика челленджа\n\n` +
     `Дата начала челленджа: ${startDate}\n` +
-    `Количество дней ${successfulDays} / ${duration}\n` +
+    `Количество дней: ${successfulDays} / ${duration}\n` +
     `Пропущено дней подряд: ${daysWithoutWorkout}\n` +
     `Время уведомлений: ${reminderTime}`,
   EDIT_REMINDER_TIME_TEXT: (timezoneText: string) =>

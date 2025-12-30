@@ -375,21 +375,32 @@ class SchedulerService {
   private getNextMidnightTime(timezone: number): Date {
     const now = new Date();
     
-    // Вычисляем текущее время в часовом поясе пользователя
-    const userTimezoneOffset = timezone * 60 * 60 * 1000; // в миллисекундах
-    const userTime = new Date(now.getTime() + userTimezoneOffset);
+    // Смещение часового пояса в миллисекундах
+    const timezoneOffsetMs = timezone * 60 * 60 * 1000;
     
-    // Создаем дату с 4:00 утра в часовом поясе пользователя
-    const midnightDate = new Date(userTime);
-    midnightDate.setUTCHours(4, 0, 0, 0);
+    // Получаем текущее время в UTC (миллисекунды)
+    const nowUtcMs = now.getTime();
+    
+    // Вычисляем текущее время в локальном часовом поясе пользователя (в миллисекундах)
+    // Это не реальное UTC время, а просто число для вычислений
+    const localNowMs = nowUtcMs + timezoneOffsetMs;
+    
+    // Вычисляем начало текущего дня в локальном времени (00:00:00)
+    const msPerDay = 24 * 60 * 60 * 1000;
+    const localDayStartMs = Math.floor(localNowMs / msPerDay) * msPerDay;
+    
+    // Время 4:00 утра сегодня в локальном времени (в миллисекундах)
+    const targetLocalMs = localDayStartMs + (4 * 60 * 60 * 1000);
     
     // Если 4:00 уже прошло сегодня, планируем на завтра
-    if (midnightDate <= userTime) {
-      midnightDate.setUTCDate(midnightDate.getUTCDate() + 1);
-    }
+    const nextTargetLocalMs = targetLocalMs <= localNowMs 
+      ? targetLocalMs + msPerDay 
+      : targetLocalMs;
     
-    // Конвертируем обратно в UTC
-    return new Date(midnightDate.getTime() - userTimezoneOffset);
+    // Конвертируем обратно в UTC: вычитаем смещение часового пояса
+    const nextTargetUtcMs = nextTargetLocalMs - timezoneOffsetMs;
+    
+    return new Date(nextTargetUtcMs);
   }
 
   /**
@@ -648,21 +659,32 @@ class SchedulerService {
     const now = new Date();
     const [hours, minutes] = reminderTime.split(':').map(Number);
     
-    // Вычисляем текущее время в часовом поясе пользователя
-    const userTimezoneOffset = timezone * 60 * 60 * 1000; // в миллисекундах
-    const userTime = new Date(now.getTime() + userTimezoneOffset);
+    // Смещение часового пояса в миллисекундах
+    const timezoneOffsetMs = timezone * 60 * 60 * 1000;
     
-    // Создаем дату с временем напоминания в часовом поясе пользователя
-    const reminderDate = new Date(userTime);
-    reminderDate.setUTCHours(hours, minutes, 0, 0);
+    // Получаем текущее время в UTC (миллисекунды)
+    const nowUtcMs = now.getTime();
+    
+    // Вычисляем текущее время в локальном часовом поясе пользователя (в миллисекундах)
+    // Это не реальное UTC время, а просто число для вычислений
+    const localNowMs = nowUtcMs + timezoneOffsetMs;
+    
+    // Вычисляем начало текущего дня в локальном времени (00:00:00)
+    const msPerDay = 24 * 60 * 60 * 1000;
+    const localDayStartMs = Math.floor(localNowMs / msPerDay) * msPerDay;
+    
+    // Время напоминания сегодня в локальном времени (в миллисекундах)
+    const targetLocalMs = localDayStartMs + (hours * 60 * 60 * 1000) + (minutes * 60 * 1000);
     
     // Если время напоминания уже прошло сегодня, планируем на завтра
-    if (reminderDate <= userTime) {
-      reminderDate.setUTCDate(reminderDate.getUTCDate() + 1);
-    }
+    const nextTargetLocalMs = targetLocalMs <= localNowMs 
+      ? targetLocalMs + msPerDay 
+      : targetLocalMs;
     
-    // Конвертируем обратно в UTC
-    return new Date(reminderDate.getTime() - userTimezoneOffset);
+    // Конвертируем обратно в UTC: вычитаем смещение часового пояса
+    const nextTargetUtcMs = nextTargetLocalMs - timezoneOffsetMs;
+    
+    return new Date(nextTargetUtcMs);
   }
 
   /**
