@@ -4,7 +4,7 @@ import { challenges } from '../database/schema.js';
 import logger from '../utils/logger.js';
 import redis from '../redis/client.js';
 import { getPhotoUploadKey } from '../redis/keys.js';
-import { getYesterdayDateString } from '../utils/date-utils.js';
+import { getYesterdayDateString, formatDateToString } from '../utils/date-utils.js';
 
 export class ChallengeService {
   /**
@@ -296,6 +296,17 @@ export class ChallengeService {
 
       // Получаем вчерашнюю дату в часовом поясе пользователя
       const yesterdayDate = getYesterdayDateString(timezoneOffset);
+      
+      // Получаем дату старта челленджа в формате YYYY-MM-DD с учетом часового пояса
+      const startDate = new Date(challenge.startDate);
+      const startDateString = formatDateToString(startDate, timezoneOffset);
+      
+      // Если вчерашняя дата раньше даты старта челленджа - не увеличиваем счетчик
+      // (челлендж еще не был активен в тот день)
+      if (yesterdayDate < startDateString) {
+        logger.debug(`Yesterday (${yesterdayDate}) is before challenge start date (${startDateString}), skipping increment for user ${userId}`);
+        return false;
+      }
 
       // Проверяем, было ли загружено фото вчера
       const hadPhotoYesterday = await this.hasPhotoUploadedToday(userId, yesterdayDate);
