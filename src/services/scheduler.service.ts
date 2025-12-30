@@ -128,6 +128,9 @@ class SchedulerService {
       
       // Инициализируем проверки пропущенных дней для всех активных челленджей, которые еще не запланированы
       await this.initializeMidnightChecksForActiveChallenges();
+      
+      // Инициализируем напоминания для всех активных челленджей, которые еще не запланированы
+      await this.initializeDailyRemindersForActiveChallenges();
     } catch (error) {
       logger.error('Error restoring tasks from Redis:', error);
     } finally {
@@ -163,16 +166,17 @@ class SchedulerService {
             continue;
           }
 
-          // Проверяем, что челлендж все еще активен и напоминания включены
+          // Проверяем, что челлендж все еще активен
           const challenge = await challengeService.getActiveChallenge(reminder.userId);
-          if (!challenge || !challenge.reminderStatus || !challenge.reminderTime) {
-            logger.warn(`Skipping reminder for user ${reminder.userId}: challenge inactive or reminders disabled`);
+          if (!challenge) {
+            logger.warn(`Skipping reminder for user ${reminder.userId}: challenge inactive`);
             await this.removeDailyReminderFromRedis(reminder.userId);
             continue;
           }
 
-          // Планируем следующее напоминание
-          await this.scheduleDailyReminder(reminder.userId, challenge.reminderTime, reminder.timezone);
+          // Планируем следующее напоминание (используем время из челленджа или null)
+          const reminderTime = challenge.reminderTime || null;
+          await this.scheduleDailyReminder(reminder.userId, reminderTime, reminder.timezone);
           restoredCount++;
         } catch (error) {
           logger.error(`Error restoring daily reminder for user ${reminder.userId}:`, error);
@@ -650,6 +654,41 @@ class SchedulerService {
   }
 
   /**
+   * Инициализирует ежедневные напоминания для всех активных челленджей, которые еще не запланированы
+   */
+  private async initializeDailyRemindersForActiveChallenges(): Promise<void> {
+    try {
+      const activeChallenges = await challengeService.getAllActiveChallenges();
+      let initializedCount = 0;
+
+      for (const challenge of activeChallenges) {
+        // Пропускаем, если напоминание уже запланировано
+        if (this.dailyReminders.has(challenge.userId)) {
+          continue;
+        }
+
+        // Получаем пользователя для получения часового пояса
+        const user = await userService.getUser(challenge.userId);
+        if (!user || user.timezone === null || user.timezone === undefined) {
+          logger.warn(`Skipping daily reminder initialization for user ${challenge.userId}: timezone not set`);
+          continue;
+        }
+
+        // Планируем ежедневное напоминание (используем время из челленджа или null для 12:00 МСК)
+        const reminderTime = challenge.reminderTime || null;
+        await this.scheduleDailyReminder(challenge.userId, reminderTime, user.timezone);
+        initializedCount++;
+      }
+
+      if (initializedCount > 0) {
+        logger.info(`Initialized ${initializedCount} daily reminders for active challenges`);
+      }
+    } catch (error) {
+      logger.error('Error initializing daily reminders for active challenges:', error);
+    }
+  }
+
+  /**
    * Вычисляет следующее время напоминания с учетом часового пояса пользователя
    * @param reminderTime - время в формате HH:MM
    * @param timezone - смещение от UTC в часах
@@ -690,21 +729,27 @@ class SchedulerService {
   /**
    * Планирует ежедневное напоминание для пользователя
    * @param userId - ID пользователя
-   * @param reminderTime - время в формате HH:MM
+   * @param reminderTime - время в формате HH:MM, или null если не установлено (будет использовано 12:00 МСК)
    * @param timezone - смещение от UTC в часах
    */
-  async scheduleDailyReminder(userId: number, reminderTime: string, timezone: number): Promise<void> {
+  async scheduleDailyReminder(userId: number, reminderTime: string | null, timezone: number): Promise<void> {
     // Отменяем предыдущее напоминание, если есть
     this.cancelDailyReminder(userId);
 
-    const scheduledTime = this.getNextReminderTime(reminderTime, timezone);
+    // Если время не установлено, используем 12:00 МСК
+    const scheduledTime = reminderTime 
+      ? this.getNextReminderTime(reminderTime, timezone)
+      : this.getNext12MSKTime();
+    
     const now = new Date();
     const delay = scheduledTime.getTime() - now.getTime();
 
     if (delay <= 0) {
       logger.warn(`Scheduled reminder time is in the past for user ${userId}, scheduling for tomorrow`);
       // Если время уже прошло, планируем на завтра
-      const tomorrowTime = this.getNextReminderTime(reminderTime, timezone);
+      const tomorrowTime = reminderTime 
+        ? this.getNextReminderTime(reminderTime, timezone)
+        : this.getNext12MSKTime();
       const tomorrowDelay = tomorrowTime.getTime() - now.getTime();
       this.scheduleDailyReminderInternal(userId, reminderTime, timezone, tomorrowTime, tomorrowDelay);
       return;
@@ -718,7 +763,7 @@ class SchedulerService {
    */
   private scheduleDailyReminderInternal(
     userId: number,
-    reminderTime: string,
+    reminderTime: string | null,
     timezone: number,
     scheduledTime: Date,
     delay: number
@@ -729,10 +774,13 @@ class SchedulerService {
 
     const timeoutId = setTimeout(async () => {
       try {
-        await this.sendDailyReminder(userId, reminderTime, timezone);
+        await this.sendDailyReminder(userId, reminderTime || '12:00', timezone);
         this.dailyReminders.delete(userId);
         // Планируем следующее напоминание
-        await this.scheduleDailyReminder(userId, reminderTime, timezone);
+        // Получаем актуальное время из челленджа
+        const challenge = await challengeService.getActiveChallenge(userId);
+        const actualReminderTime = challenge?.reminderTime || null;
+        await this.scheduleDailyReminder(userId, actualReminderTime, timezone);
       } catch (error: any) {
         // Проверяем, не заблокировал ли пользователь бота
         const shouldCancel = handleTelegramError(error, userId);
@@ -748,7 +796,9 @@ class SchedulerService {
         this.dailyReminders.delete(userId);
         // Пытаемся запланировать следующее напоминание даже при ошибке
         try {
-          await this.scheduleDailyReminder(userId, reminderTime, timezone);
+          const challenge = await challengeService.getActiveChallenge(userId);
+          const actualReminderTime = challenge?.reminderTime || null;
+          await this.scheduleDailyReminder(userId, actualReminderTime, timezone);
         } catch (retryError) {
           logger.error(`Error retrying daily reminder for user ${userId}:`, retryError);
         }
@@ -761,8 +811,8 @@ class SchedulerService {
       scheduledTime,
     });
 
-    // Сохраняем в Redis
-    this.saveDailyReminderToRedis(userId, reminderTime, timezone, scheduledTime);
+    // Сохраняем в Redis (используем "12:00" если время не установлено)
+    this.saveDailyReminderToRedis(userId, reminderTime || '12:00', timezone, scheduledTime);
   }
 
   /**
@@ -822,8 +872,8 @@ class SchedulerService {
     try {
       // Проверяем, что челлендж все еще активен
       const challenge = await challengeService.getActiveChallenge(userId);
-      if (!challenge || !challenge.reminderStatus) {
-        logger.info(`Skipping reminder for user ${userId}: challenge inactive or reminders disabled`);
+      if (!challenge) {
+        logger.info(`Skipping reminder for user ${userId}: challenge inactive`);
         this.cancelDailyReminder(userId);
         return;
       }
@@ -845,7 +895,7 @@ class SchedulerService {
 
       // Проверяем, есть ли пропущенные дни
       if (challenge.daysWithoutWorkout > 0) {
-        // Отправляем сообщение о пропущенной тренировке
+        // Отправляем сообщение о пропущенной тренировке (всегда, даже если уведомления отключены)
         const missedWorkoutText = 
           'Вчера ты дал жиру отдохнуть. Поделишься своим отчётом? Отправь его в чат, я сохраню, и по завершению челленджа ты увидишь, где были сложности и как прогрессировал.';
         
@@ -873,9 +923,26 @@ class SchedulerService {
           }
           throw error;
         }
-      } else {
-        // Отправляем обычное мотивационное сообщение
-        const reminderPhrase = getRandomReminderPhrase();
+        
+        // После отправки уведомления о пропущенном дне, планируем следующее
+        // Получаем актуальное время из челленджа
+        const actualReminderTime = challenge.reminderTime || null;
+        await this.scheduleDailyReminder(userId, actualReminderTime, _timezone);
+        return;
+      }
+      
+      // Если нет пропущенных дней, проверяем, включены ли уведомления
+      if (!challenge.reminderStatus) {
+        // Уведомления отключены и нет пропущенных дней - не отправляем мотивационное сообщение
+        // Но планируем следующую проверку на завтра
+        const actualReminderTime = challenge.reminderTime || null;
+        await this.scheduleDailyReminder(userId, actualReminderTime, _timezone);
+        return;
+      }
+      
+      // Уведомления включены и нет пропущенных дней - отправляем обычное мотивационное сообщение
+      // Отправляем обычное мотивационное сообщение
+      const reminderPhrase = getRandomReminderPhrase();
         try {
           await this.botApi.sendMessage(userId, reminderPhrase);
         } catch (error) {
@@ -935,7 +1002,10 @@ class SchedulerService {
           }
           throw error;
         }
-      }
+        
+        // Планируем следующее напоминание
+        const actualReminderTime = challenge.reminderTime || null;
+        await this.scheduleDailyReminder(userId, actualReminderTime, _timezone);
     } catch (error) {
       const shouldCancel = handleTelegramError(error, userId);
       if (shouldCancel) {
@@ -992,6 +1062,38 @@ class SchedulerService {
 
     // Конвертируем обратно в UTC
     return new Date(targetMSK.getTime() - mskOffset);
+  }
+
+  /**
+   * Получает время следующего 12:00 МСК (сегодня, если еще не прошло, иначе завтра)
+   */
+  private getNext12MSKTime(): Date {
+    const now = new Date();
+    // МСК = UTC+3
+    const mskOffset = 3 * 60 * 60 * 1000;
+    
+    // Получаем текущее время в UTC (миллисекунды)
+    const nowUtcMs = now.getTime();
+    
+    // Вычисляем текущее время в МСК (в миллисекундах для вычислений)
+    const localNowMs = nowUtcMs + mskOffset;
+    
+    // Вычисляем начало текущего дня в МСК (00:00:00)
+    const msPerDay = 24 * 60 * 60 * 1000;
+    const localDayStartMs = Math.floor(localNowMs / msPerDay) * msPerDay;
+    
+    // Время 12:00 сегодня в МСК (в миллисекундах)
+    const targetLocalMs = localDayStartMs + (12 * 60 * 60 * 1000);
+    
+    // Если 12:00 уже прошло сегодня, планируем на завтра
+    const nextTargetLocalMs = targetLocalMs <= localNowMs 
+      ? targetLocalMs + msPerDay 
+      : targetLocalMs;
+    
+    // Конвертируем обратно в UTC: вычитаем смещение часового пояса
+    const nextTargetUtcMs = nextTargetLocalMs - mskOffset;
+    
+    return new Date(nextTargetUtcMs);
   }
 
   /**
