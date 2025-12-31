@@ -107,6 +107,36 @@ export class UserService {
       throw error;
     }
   }
+
+  /**
+   * Получает часовой пояс пользователя или устанавливает МСК (UTC+3) по умолчанию, если не установлен
+   * @param userId - ID пользователя
+   * @returns Часовой пояс пользователя (МСК по умолчанию)
+   */
+  async getOrSetDefaultTimezone(userId: number): Promise<number> {
+    try {
+      const user = await this.getUser(userId);
+      
+      if (!user) {
+        logger.warn(`User ${userId} not found, using MSK (UTC+3) as default`);
+        return 3; // МСК = UTC+3
+      }
+
+      if (user.timezone === null || user.timezone === undefined) {
+        // Устанавливаем МСК (UTC+3) по умолчанию
+        const mskTimezone = 3;
+        await this.updateTimezone(userId, mskTimezone);
+        logger.info(`Set default timezone MSK (UTC+3) for user ${userId}`);
+        return mskTimezone;
+      }
+
+      return user.timezone;
+    } catch (error) {
+      logger.error(`Error getting or setting default timezone for user ${userId}:`, error);
+      // В случае ошибки возвращаем МСК по умолчанию
+      return 3;
+    }
+  }
 }
 
 export const userService = new UserService();
