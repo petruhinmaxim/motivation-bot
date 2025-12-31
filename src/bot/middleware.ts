@@ -291,7 +291,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           // Обрезаем время до формата HH:MM (на случай, если в БД хранится с секундами)
           const reminderTime = challenge.reminderTime.slice(0, 5);
           await challengeService.updateReminderTime(userId, reminderTime);
-          await schedulerService.scheduleDailyReminder(userId, reminderTime, user.timezone);
+          await schedulerService.scheduleDailyReminder(userId, reminderTime);
           await schedulerService.scheduleMidnightCheck(userId);
           await ctx.answerCallbackQuery('✅ Уведомления включены');
           await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_SETTINGS' });
@@ -390,7 +390,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           // Получаем часовой пояс пользователя и планируем напоминание
           const user = await userService.getUser(userId);
           if (user?.timezone !== null && user?.timezone !== undefined) {
-            await schedulerService.scheduleDailyReminder(userId, validation.time, user.timezone);
+            await schedulerService.scheduleDailyReminder(userId, validation.time);
             // Планируем полночную проверку
             await schedulerService.scheduleMidnightCheck(userId);
           }
@@ -420,7 +420,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           // Получаем часовой пояс пользователя и перепланируем напоминание
           const user = await userService.getUser(userId);
           if (user?.timezone !== null && user?.timezone !== undefined) {
-            await schedulerService.scheduleDailyReminder(userId, validation.time, user.timezone);
+            await schedulerService.scheduleDailyReminder(userId, validation.time);
             // Перепланируем полночную проверку
             await schedulerService.scheduleMidnightCheck(userId);
           }
