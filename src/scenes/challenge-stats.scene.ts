@@ -2,6 +2,7 @@ import type { Context } from 'grammy';
 import { InlineKeyboard } from 'grammy';
 import { BUTTONS, MESSAGES, MESSAGE_FUNCTIONS } from './messages.js';
 import { challengeService } from '../services/challenge.service.js';
+import { userService } from '../services/user.service.js';
 
 export async function handleChallengeStatsScene(ctx: Context) {
   const userId = ctx.from?.id;
@@ -35,12 +36,17 @@ export async function handleChallengeStatsScene(ctx: Context) {
     reminderTimeText = 'отключены';
   }
 
+  // Получаем часовой пояс пользователя
+  const user = await userService.getUser(userId);
+  const timezone = user?.timezone ?? null;
+
   const messageText = MESSAGE_FUNCTIONS.CHALLENGE_STATS_TEXT(
     formattedStartDate,
     challenge.successfulDays,
     challenge.duration,
     challenge.daysWithoutWorkout,
-    reminderTimeText
+    reminderTimeText,
+    timezone
   );
 
   const keyboard = new InlineKeyboard()

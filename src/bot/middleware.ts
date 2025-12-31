@@ -292,7 +292,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           const reminderTime = challenge.reminderTime.slice(0, 5);
           await challengeService.updateReminderTime(userId, reminderTime);
           await schedulerService.scheduleDailyReminder(userId, reminderTime, user.timezone);
-          await schedulerService.scheduleMidnightCheck(userId, user.timezone);
+          await schedulerService.scheduleMidnightCheck(userId);
           await ctx.answerCallbackQuery('✅ Уведомления включены');
           await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_SETTINGS' });
           await handleChallengeSettingsScene(ctx);
@@ -392,7 +392,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           if (user?.timezone !== null && user?.timezone !== undefined) {
             await schedulerService.scheduleDailyReminder(userId, validation.time, user.timezone);
             // Планируем полночную проверку
-            await schedulerService.scheduleMidnightCheck(userId, user.timezone);
+            await schedulerService.scheduleMidnightCheck(userId);
           }
           
           // Отменяем таймер бездействия при выходе из процесса регистрации
@@ -422,7 +422,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           if (user?.timezone !== null && user?.timezone !== undefined) {
             await schedulerService.scheduleDailyReminder(userId, validation.time, user.timezone);
             // Перепланируем полночную проверку
-            await schedulerService.scheduleMidnightCheck(userId, user.timezone);
+            await schedulerService.scheduleMidnightCheck(userId);
           }
           
           // Отправляем уведомление об успехе

@@ -138,12 +138,26 @@ export const MESSAGES = {
 
 // Функции для генерации текстов с параметрами
 export const MESSAGE_FUNCTIONS = {
-  CHALLENGE_STATS_TEXT: (startDate: string, successfulDays: number, duration: number, daysWithoutWorkout: number, reminderTime: string) =>
-    `📊 Статистика челленджа\n\n` +
-    `Дата начала челленджа: ${startDate}\n` +
-    `Количество дней: ${successfulDays} / ${duration}\n` +
-    `Пропущено дней подряд: ${daysWithoutWorkout}\n` +
-    `Время уведомлений: ${reminderTime}`,
+  CHALLENGE_STATS_TEXT: (startDate: string, successfulDays: number, duration: number, daysWithoutWorkout: number, reminderTime: string, timezoneOffset?: number | null) => {
+    // Форматируем часовой пояс относительно МСК (МСК = UTC+3)
+    let timezoneText = '';
+    if (timezoneOffset !== null && timezoneOffset !== undefined) {
+      const mskOffset = 3; // МСК = UTC+3
+      const diffFromMsk = timezoneOffset - mskOffset;
+      if (diffFromMsk === 0) {
+        timezoneText = ' (МСК)';
+      } else {
+        const sign = diffFromMsk >= 0 ? '+' : '';
+        timezoneText = ` (${sign}${diffFromMsk} МСК)`;
+      }
+    }
+    
+    return `📊 Статистика челленджа\n\n` +
+      `Дата начала челленджа: ${startDate}\n` +
+      `Количество дней: ${successfulDays} / ${duration}\n` +
+      `Пропущено дней подряд: ${daysWithoutWorkout}\n` +
+      `Время уведомлений: ${reminderTime}${timezoneText}`;
+  },
   EDIT_REMINDER_TIME_TEXT: (timezoneText: string) =>
     `Твой часовой пояс: ${timezoneText}. Напиши в чат новое время напоминаний, к примеру "14:00" или "14 00"`,
   REMINDER_TIME_TEXT: (timezoneText: string) =>

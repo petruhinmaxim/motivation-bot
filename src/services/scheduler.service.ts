@@ -413,9 +413,8 @@ class SchedulerService {
   /**
    * Планирует проверку пропущенных дней для пользователя (выполняется в 4:00 утра по местному времени)
    * @param userId - ID пользователя
-   * @param timezone - Смещение от UTC в часах (если не установлен, будет установлен МСК)
    */
-  async scheduleMidnightCheck(userId: number, timezone: number): Promise<void> {
+  async scheduleMidnightCheck(userId: number): Promise<void> {
     // Отменяем предыдущую проверку, если есть
     this.cancelMidnightCheck(userId);
 
@@ -458,14 +457,13 @@ class SchedulerService {
         await this.performMidnightCheck(userId, currentTimezone);
         this.midnightChecks.delete(userId);
         // Планируем следующую проверку
-        await this.scheduleMidnightCheck(userId, currentTimezone);
+        await this.scheduleMidnightCheck(userId);
       } catch (error) {
         logger.error(`Error in midnight check for user ${userId}:`, error);
         this.midnightChecks.delete(userId);
         // Пытаемся запланировать следующую проверку даже при ошибке
         try {
-          const currentTimezone = await userService.getOrSetDefaultTimezone(userId);
-          await this.scheduleMidnightCheck(userId, currentTimezone);
+          await this.scheduleMidnightCheck(userId);
         } catch (retryError) {
           logger.error(`Error retrying midnight check for user ${userId}:`, retryError);
         }
@@ -577,11 +575,8 @@ class SchedulerService {
             continue;
           }
 
-          // Получаем или устанавливаем часовой пояс по умолчанию (МСК)
-          const userTimezone = await userService.getOrSetDefaultTimezone(check.userId);
-
-          // Планируем следующую проверку
-          await this.scheduleMidnightCheck(check.userId, userTimezone);
+          // Планируем следующую проверку (часовой пояс будет установлен автоматически, если нужно)
+          await this.scheduleMidnightCheck(check.userId);
           restoredCount++;
         } catch (error) {
           logger.error(`Error restoring midnight check for user ${check.userId}:`, error);
@@ -640,11 +635,9 @@ class SchedulerService {
           continue;
         }
 
-        // Получаем или устанавливаем часовой пояс по умолчанию (МСК)
-        const userTimezone = await userService.getOrSetDefaultTimezone(challenge.userId);
-
         // Планируем проверку пропущенных дней (4:00 утра)
-        await this.scheduleMidnightCheck(challenge.userId, userTimezone);
+        // Часовой пояс будет установлен автоматически (МСК), если не установлен
+        await this.scheduleMidnightCheck(challenge.userId);
         initializedCount++;
       }
 
