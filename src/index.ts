@@ -30,6 +30,9 @@ async function shutdown(signal: string): Promise<void> {
     await bot.stop();
     logger.info('Bot stopped');
 
+    // Останавливаем периодическую проверку напоминаний
+    schedulerService.stopHealthCheck();
+
     // Закрываем соединения с БД и Redis
     logger.info('Closing database connections...');
     await Promise.all([
@@ -64,6 +67,10 @@ async function start() {
     logger.info('Restoring scheduled tasks...');
     await schedulerService.restoreTasks();
     logger.info('✅ Scheduled tasks restored');
+
+    // Запускаем периодическую проверку напоминаний (каждые 12 часов)
+    schedulerService.startHealthCheck(12);
+    logger.info('✅ Reminder health check started');
   } catch (error) {
     logger.error('Failed to start application:', error);
     await shutdown('STARTUP_ERROR');

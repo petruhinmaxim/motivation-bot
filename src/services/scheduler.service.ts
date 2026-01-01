@@ -50,6 +50,7 @@ class SchedulerService {
   private midnightChecks = new Map<number, ScheduledTask>();
   private botApi: Api | null = null;
   private isRestoring = false; // Флаг для предотвращения параллельных вызовов restoreTasks
+  private healthCheckInterval: NodeJS.Timeout | null = null;
 
   /**
    * Устанавливает API бота (вызывается после инициализации бота)
@@ -674,6 +675,111 @@ class SchedulerService {
   }
 
   /**
+   * Проверяет все активные челленджи и восстанавливает напоминания, если они отсутствуют
+   */
+  private async verifyAndRestoreReminders(): Promise<void> {
+    try {
+      logger.info('Starting reminder health check...');
+      
+      const activeChallenges = await challengeService.getAllActiveChallenges();
+      let restoredCount = 0;
+      let checkedCount = 0;
+
+      for (const challenge of activeChallenges) {
+        checkedCount++;
+        
+        // Проверяем, должно ли быть напоминание
+        // Если reminderStatus = false, напоминание не должно быть
+        if (!challenge.reminderStatus) {
+          continue;
+        }
+
+        // Проверяем, есть ли напоминание в памяти
+        const hasInMemory = this.dailyReminders.has(challenge.userId);
+        
+        // Проверяем, есть ли напоминание в Redis
+        const reminderDataKey = getDailyReminderDataKey(challenge.userId);
+        const reminderDataJson = await redis.get(reminderDataKey);
+        const hasInRedis = reminderDataJson !== null;
+
+        // Если напоминание отсутствует и в памяти, и в Redis - восстанавливаем
+        if (!hasInMemory && !hasInRedis) {
+          logger.warn(`Reminder missing for user ${challenge.userId}, restoring...`);
+          try {
+            const reminderTime = challenge.reminderTime || null;
+            await this.scheduleDailyReminder(challenge.userId, reminderTime);
+            restoredCount++;
+          } catch (error) {
+            logger.error(`Error restoring reminder for user ${challenge.userId}:`, error);
+          }
+        } else if (hasInRedis && !hasInMemory) {
+          // Напоминание есть в Redis, но не в памяти - восстанавливаем из Redis
+          logger.warn(`Reminder exists in Redis but not in memory for user ${challenge.userId}, restoring...`);
+          try {
+            const reminderData: DailyReminderData = JSON.parse(reminderDataJson!);
+            const scheduledTime = new Date(reminderData.scheduledTime);
+            const now = new Date();
+            
+            // Если время еще не прошло, планируем
+            if (scheduledTime > now) {
+              const delay = scheduledTime.getTime() - now.getTime();
+              await this.scheduleDailyReminderInternal(
+                challenge.userId,
+                reminderData.reminderTime,
+                scheduledTime,
+                delay
+              );
+              restoredCount++;
+            } else {
+              // Время прошло, планируем следующее
+              await this.scheduleDailyReminder(challenge.userId, reminderData.reminderTime);
+              restoredCount++;
+            }
+          } catch (error) {
+            logger.error(`Error restoring reminder from Redis for user ${challenge.userId}:`, error);
+          }
+        }
+      }
+
+      logger.info(`Health check completed: checked ${checkedCount} challenges, restored ${restoredCount} reminders`);
+    } catch (error) {
+      logger.error('Error in verifyAndRestoreReminders:', error);
+    }
+  }
+
+  /**
+   * Запускает периодическую проверку и восстановление напоминаний
+   * @param intervalHours - интервал проверки в часах (по умолчанию 12 часов)
+   */
+  startHealthCheck(intervalHours: number = 12): void {
+    // Проверяем сразу при запуске
+    this.verifyAndRestoreReminders().catch((error) => {
+      logger.error('Error in initial health check:', error);
+    });
+
+    // Затем проверяем периодически
+    const intervalMs = intervalHours * 60 * 60 * 1000; // Конвертируем часы в миллисекунды
+    this.healthCheckInterval = setInterval(() => {
+      this.verifyAndRestoreReminders().catch((error) => {
+        logger.error('Error in periodic health check:', error);
+      });
+    }, intervalMs);
+
+    logger.info(`Started reminder health check with interval ${intervalHours} hours`);
+  }
+
+  /**
+   * Останавливает периодическую проверку
+   */
+  stopHealthCheck(): void {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+      logger.info('Stopped reminder health check');
+    }
+  }
+
+  /**
    * Вычисляет следующее время напоминания с учетом часового пояса пользователя
    * @param reminderTime - время в формате HH:MM
    * @param timezone - смещение от UTC в часах
@@ -738,22 +844,22 @@ class SchedulerService {
         ? this.getNextReminderTime(reminderTime, userTimezone)
         : this.getNext12MSKTime();
       const tomorrowDelay = tomorrowTime.getTime() - now.getTime();
-      this.scheduleDailyReminderInternal(userId, reminderTime, tomorrowTime, tomorrowDelay);
+      await this.scheduleDailyReminderInternal(userId, reminderTime, tomorrowTime, tomorrowDelay);
       return;
     }
 
-    this.scheduleDailyReminderInternal(userId, reminderTime, scheduledTime, delay);
+    await this.scheduleDailyReminderInternal(userId, reminderTime, scheduledTime, delay);
   }
 
   /**
    * Внутренний метод для планирования ежедневного напоминания
    */
-  private scheduleDailyReminderInternal(
+  private async scheduleDailyReminderInternal(
     userId: number,
     reminderTime: string | null,
     scheduledTime: Date,
     delay: number
-  ): void {
+  ): Promise<void> {
     logger.info(
       `Scheduling daily reminder for user ${userId} at ${scheduledTime.toISOString()} (in ${Math.round(delay / 1000)}s)`
     );
@@ -799,18 +905,15 @@ class SchedulerService {
       scheduledTime,
     });
 
-    // Сохраняем в Redis (используем "12:00" если время не установлено)
-    // Получаем часовой пояс для сохранения в Redis асинхронно
-    (async () => {
-      try {
-        const userTimezone = await userService.getOrSetDefaultTimezone(userId);
-        this.saveDailyReminderToRedis(userId, reminderTime || '12:00', userTimezone, scheduledTime);
-      } catch (error) {
-        logger.error(`Error getting timezone for saving reminder to Redis for user ${userId}:`, error);
-        // Используем МСК по умолчанию
-        this.saveDailyReminderToRedis(userId, reminderTime || '12:00', 3, scheduledTime);
-      }
-    })();
+    // Сохраняем в Redis синхронно (с await)
+    try {
+      const userTimezone = await userService.getOrSetDefaultTimezone(userId);
+      await this.saveDailyReminderToRedis(userId, reminderTime || '12:00', userTimezone, scheduledTime);
+    } catch (error) {
+      logger.error(`Error getting timezone for saving reminder to Redis for user ${userId}:`, error);
+      // Используем МСК по умолчанию
+      await this.saveDailyReminderToRedis(userId, reminderTime || '12:00', 3, scheduledTime);
+    }
   }
 
   /**
