@@ -169,17 +169,37 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
 
       if (data === 'start_today') {
         try {
+          // Логируем текущее состояние перед переходом
+          const sceneBefore = await stateService.getCurrentScene(userId);
+          logger.info(`User ${userId} clicked start_today. Current scene: ${sceneBefore}`);
+          
           // Создаем новый челлендж с продолжительностью 30 дней
           await challengeService.createOrUpdateChallenge(userId, 30);
+          logger.debug(`Challenge created for user ${userId}`);
           
           // Переходим к сцене выбора часового пояса
-          // sendEvent теперь возвращает обновленное состояние
+          // sendEvent теперь возвращает обновленное состояние и сохраняет его в Redis
           const newScene = await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+          logger.info(`User ${userId} state changed to: ${newScene} after GO_TO_TIMEZONE event`);
+          
+          // Проверяем, что состояние действительно обновилось
+          const verifyScene = await stateService.getCurrentScene(userId);
+          if (verifyScene !== 'timezone') {
+            logger.error(`State mismatch after GO_TO_TIMEZONE for user ${userId}. Expected: timezone, got: ${verifyScene}. Retrying...`);
+            // Пытаемся восстановить состояние
+            const retryScene = await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+            logger.info(`User ${userId} state after retry: ${retryScene}`);
+          }
+          
+          // Финальная проверка состояния
+          const finalScene = await stateService.getCurrentScene(userId);
+          logger.info(`User ${userId} final scene before handleTimezoneScene: ${finalScene}`);
+          
           // Обновляем сцену в таймере (переход между сценами регистрации - таймер продолжает идти)
           if (idleTimerService.hasActiveTimer(userId)) {
-            idleTimerService.updateScene(userId, newScene);
+            idleTimerService.updateScene(userId, 'timezone');
           } else {
-            idleTimerService.startIdleTimer(userId, newScene);
+            idleTimerService.startIdleTimer(userId, 'timezone');
           }
           await handleTimezoneScene(ctx);
         } catch (error: any) {
@@ -225,13 +245,22 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           await challengeService.createOrUpdateChallenge(userId, 30);
           
           // Переходим к сцене выбора часового пояса
-          // sendEvent теперь возвращает обновленное состояние
+          // sendEvent теперь возвращает обновленное состояние и сохраняет его в Redis
           const newScene = await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+          
+          // Проверяем, что состояние действительно обновилось
+          const verifyScene = await stateService.getCurrentScene(userId);
+          if (verifyScene !== 'timezone') {
+            logger.error(`State mismatch after GO_TO_TIMEZONE for user ${userId}. Expected: timezone, got: ${verifyScene}. Retrying...`);
+            // Пытаемся восстановить состояние
+            await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+          }
+          
           // Обновляем сцену в таймере (переход между сценами регистрации - таймер продолжает идти)
           if (idleTimerService.hasActiveTimer(userId)) {
-            idleTimerService.updateScene(userId, newScene);
+            idleTimerService.updateScene(userId, 'timezone');
           } else {
-            idleTimerService.startIdleTimer(userId, newScene);
+            idleTimerService.startIdleTimer(userId, 'timezone');
           }
           await handleTimezoneScene(ctx);
         } catch (error: any) {
@@ -259,13 +288,22 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           await challengeService.createOrUpdateChallenge(userId, 30);
           
           // Переходим к сцене выбора часового пояса
-          // sendEvent теперь возвращает обновленное состояние
+          // sendEvent теперь возвращает обновленное состояние и сохраняет его в Redis
           const newScene = await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+          
+          // Проверяем, что состояние действительно обновилось
+          const verifyScene = await stateService.getCurrentScene(userId);
+          if (verifyScene !== 'timezone') {
+            logger.error(`State mismatch after GO_TO_TIMEZONE for user ${userId}. Expected: timezone, got: ${verifyScene}. Retrying...`);
+            // Пытаемся восстановить состояние
+            await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+          }
+          
           // Обновляем сцену в таймере (переход между сценами регистрации - таймер продолжает идти)
           if (idleTimerService.hasActiveTimer(userId)) {
-            idleTimerService.updateScene(userId, newScene);
+            idleTimerService.updateScene(userId, 'timezone');
           } else {
-            idleTimerService.startIdleTimer(userId, newScene);
+            idleTimerService.startIdleTimer(userId, 'timezone');
           }
           await handleTimezoneScene(ctx);
         } catch (error: any) {
@@ -387,8 +425,12 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
 
     // Обрабатываем текстовые сообщения в зависимости от текущей сцены
     if (ctx.message?.text && ctx.message.text !== '/start') {
-      // currentScene уже получен выше, но получаем снова для актуальности
-      const currentScene = await stateService.getCurrentScene(userId);
+      // Получаем актуальное состояние сцены перед обработкой текстового сообщения
+      // Это важно, так как состояние могло измениться с момента получения на строке 52
+      let currentScene = await stateService.getCurrentScene(userId);
+      
+      // Логируем для отладки (можно убрать в продакшене)
+      logger.debug(`Processing text message for user ${userId}, current scene: ${currentScene}, text: ${ctx.message.text.substring(0, 50)}`);
       
       // Если пользователь ожидал фото, но отправил текст, возвращаем в статистику
       if (currentScene === 'waiting_for_photo') {
@@ -399,6 +441,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       }
 
       // Обрабатываем timezone только если пользователь в сцене timezone
+      // Важно: проверяем состояние непосредственно перед обработкой
       if (currentScene === 'timezone') {
         const timezone = parseTimezone(ctx.message.text);
         
@@ -418,8 +461,27 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           return;
         } else {
           // Не удалось распарсить, просим повторить
+          // Важно: после ошибки пользователь должен остаться в сцене timezone
+          // Явно проверяем и восстанавливаем состояние, если оно потерялось
+          const sceneAfterError = await stateService.getCurrentScene(userId);
+          if (sceneAfterError !== 'timezone') {
+            logger.warn(`Scene lost after timezone parse error for user ${userId}. Expected: timezone, got: ${sceneAfterError}. Restoring to timezone.`);
+            await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+          }
           await ctx.reply(MESSAGES.TIMEZONE.PARSE_ERROR);
           return;
+        }
+      }
+      
+      // Дополнительная проверка: если текст похож на часовой пояс, но мы не в сцене timezone,
+      // возможно состояние потерялось - пытаемся восстановить
+      if (currentScene !== 'timezone' && currentScene !== 'edit_timezone') {
+        const potentialTimezone = parseTimezone(ctx.message.text);
+        if (potentialTimezone !== null) {
+          // Текст похож на часовой пояс, но мы не в нужной сцене
+          // Проверяем, не должны ли мы быть в сцене timezone
+          logger.warn(`User ${userId} sent timezone-like text "${ctx.message.text}" but is in scene "${currentScene}". This might indicate state loss.`);
+          // Не обрабатываем автоматически, чтобы не нарушить логику, но логируем для диагностики
         }
       }
 
@@ -439,6 +501,13 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           return;
         } else {
           // Не удалось распарсить, просим повторить
+          // Важно: после ошибки пользователь должен остаться в сцене edit_timezone
+          // Явно проверяем и восстанавливаем состояние, если оно потерялось
+          const sceneAfterError = await stateService.getCurrentScene(userId);
+          if (sceneAfterError !== 'edit_timezone') {
+            logger.warn(`Scene lost after edit_timezone parse error for user ${userId}, restoring to edit_timezone`);
+            await stateService.sendEvent(userId, { type: 'GO_TO_EDIT_TIMEZONE' });
+          }
           await ctx.reply(MESSAGES.TIMEZONE.PARSE_ERROR_EDIT);
           return;
         }

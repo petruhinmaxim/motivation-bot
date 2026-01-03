@@ -27,6 +27,7 @@ export class StateService {
         // Восстанавливаем состояние через события
         try {
           const savedState = JSON.parse(stateJson) as Scene;
+          logger.info(`Restoring state for user ${userId} from Redis: ${savedState}`);
           
           // Переводим машину в нужное состояние через события
           if (savedState === 'info') {
@@ -76,10 +77,19 @@ export class StateService {
             actor.send({ type: 'GO_TO_START' });
           }
           
-          logger.debug(`Restored state for user ${userId}: ${savedState}`);
+          // Проверяем, что состояние действительно восстановилось
+          const restoredSnapshot = actor.getSnapshot();
+          const restoredScene = restoredSnapshot.context.scene;
+          if (restoredScene !== savedState) {
+            logger.error(`State restoration mismatch for user ${userId}. Expected: ${savedState}, got: ${restoredScene}`);
+          } else {
+            logger.info(`Successfully restored state for user ${userId}: ${savedState}`);
+          }
         } catch (error) {
           logger.warn(`Failed to restore state for user ${userId}, using default:`, error);
         }
+      } else {
+        logger.debug(`No saved state found in Redis for user ${userId}, using default state`);
       }
 
       // Сохраняем состояние при каждом изменении
@@ -108,6 +118,8 @@ export class StateService {
       
       // Устанавливаем TTL на 30 дней
       await redis.expire(stateKey, 60 * 60 * 24 * 30);
+      
+      logger.debug(`State saved for user ${userId}: ${scene}`);
     } catch (error) {
       logger.error(`Error saving state for user ${userId}:`, error);
     }
@@ -122,13 +134,32 @@ export class StateService {
   async sendEvent(userId: number, event: any): Promise<Scene> {
     const actor = await this.getActor(userId);
     
+    // Получаем состояние до отправки события для логирования
+    const snapshotBefore = actor.getSnapshot();
+    const sceneBefore = snapshotBefore.context.scene;
+    
+    logger.debug(`Sending event ${event.type} for user ${userId}. Current scene: ${sceneBefore}`);
+    
     // Отправляем событие
     // XState обрабатывает события синхронно, поэтому состояние обновится сразу
     actor.send(event);
     
     // Получаем обновленное состояние сразу после отправки события
     const snapshot = actor.getSnapshot();
-    return snapshot.context.scene;
+    const newScene = snapshot.context.scene;
+    
+    // Проверяем, что состояние действительно изменилось
+    if (sceneBefore === newScene && event.type !== 'GO_TO_START') {
+      logger.warn(`State did not change after event ${event.type} for user ${userId}. Scene before: ${sceneBefore}, scene after: ${newScene}`);
+    }
+    
+    // Важно: явно сохраняем состояние в Redis синхронно
+    // Это гарантирует, что состояние будет сохранено до следующего запроса
+    await this.saveState(userId, snapshot);
+    
+    logger.info(`State changed for user ${userId} from ${sceneBefore} to ${newScene} after event ${event.type}`);
+    
+    return newScene;
   }
 }
 
