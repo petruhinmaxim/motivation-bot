@@ -41,7 +41,7 @@ const MAX_FILE_SIZE = 20 * 1024 * 1024;
 /**
  * Вспомогательная функция для корректного перехода в состояние timezone.
  * Если пользователь находится в состоянии, из которого нельзя напрямую перейти в timezone,
- * сначала переводит его в begin, а затем в timezone.
+ * использует промежуточные переходы через begin (или start -> begin).
  */
 async function goToTimezone(userId: number): Promise<Scene> {
   const currentScene = await stateService.getCurrentScene(userId);
@@ -51,9 +51,16 @@ async function goToTimezone(userId: number): Promise<Scene> {
   if (currentScene === 'begin' || currentScene === 'tomorrow' || currentScene === 'monday') {
     // Можем напрямую перейти
     return await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
-  } else {
-    // Сначала переходим в begin, затем в timezone
+  } else if (currentScene === 'start' || currentScene === 'challenge_stats') {
+    // Из start и challenge_stats можно перейти в begin
     logger.debug(`User ${userId} is in state ${currentScene}, transitioning through begin to timezone`);
+    await stateService.sendEvent(userId, { type: 'GO_TO_BEGIN' });
+    return await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+  } else {
+    // Для других состояний используем путь через start -> begin -> timezone
+    // GO_TO_START доступен из большинства состояний
+    logger.debug(`User ${userId} is in state ${currentScene}, transitioning through start -> begin -> timezone`);
+    await stateService.sendEvent(userId, { type: 'GO_TO_START' });
     await stateService.sendEvent(userId, { type: 'GO_TO_BEGIN' });
     return await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
   }

@@ -184,6 +184,9 @@ export const botMachine = setup({
         GO_TO_FEEDBACK: {
           target: 'feedback',
         },
+        GO_TO_BEGIN: {
+          target: 'begin',
+        },
         GO_BACK: {
           target: 'challenge_rules',
         },
