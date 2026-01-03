@@ -6,6 +6,7 @@ import { challengeService } from '../services/challenge.service.js';
 import { idleTimerService } from '../services/idle-timer.service.js';
 import { parseTimezone } from '../utils/timezone-parser.js';
 import logger from '../utils/logger.js';
+import type { Scene } from '../state/types.js';
 import {
   handleStartScene,
   handleInfoScene,
@@ -249,9 +250,8 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           const newScene = await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
           
           // Проверяем, что состояние действительно обновилось
-          const verifyScene = await stateService.getCurrentScene(userId);
-          if (verifyScene !== 'timezone') {
-            logger.error(`State mismatch after GO_TO_TIMEZONE for user ${userId}. Expected: timezone, got: ${verifyScene}. Retrying...`);
+          if (newScene !== 'timezone') {
+            logger.error(`State mismatch after GO_TO_TIMEZONE for user ${userId}. Expected: timezone, got: ${newScene}. Retrying...`);
             // Пытаемся восстановить состояние
             await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
           }
@@ -292,9 +292,8 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           const newScene = await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
           
           // Проверяем, что состояние действительно обновилось
-          const verifyScene = await stateService.getCurrentScene(userId);
-          if (verifyScene !== 'timezone') {
-            logger.error(`State mismatch after GO_TO_TIMEZONE for user ${userId}. Expected: timezone, got: ${verifyScene}. Retrying...`);
+          if (newScene !== 'timezone') {
+            logger.error(`State mismatch after GO_TO_TIMEZONE for user ${userId}. Expected: timezone, got: ${newScene}. Retrying...`);
             // Пытаемся восстановить состояние
             await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
           }
@@ -475,7 +474,9 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       
       // Дополнительная проверка: если текст похож на часовой пояс, но мы не в сцене timezone,
       // возможно состояние потерялось - пытаемся восстановить
-      if (currentScene !== 'timezone' && currentScene !== 'edit_timezone') {
+      // Проверяем, что мы не в сценах, связанных с timezone
+      // Используем явную проверку для избежания проблем с типами TypeScript
+      if (currentScene !== 'edit_timezone') {
         const potentialTimezone = parseTimezone(ctx.message.text);
         if (potentialTimezone !== null) {
           // Текст похож на часовой пояс, но мы не в нужной сцене
