@@ -6,7 +6,6 @@ import { challengeService } from '../services/challenge.service.js';
 import { idleTimerService } from '../services/idle-timer.service.js';
 import { parseTimezone } from '../utils/timezone-parser.js';
 import logger from '../utils/logger.js';
-import type { Scene } from '../state/types.js';
 import {
   handleStartScene,
   handleInfoScene,
