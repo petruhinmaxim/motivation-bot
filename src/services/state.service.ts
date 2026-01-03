@@ -8,7 +8,7 @@ import type { Scene } from '../state/types.js';
 
 export class StateService {
   private actors = new Map<number, BotActor>();
-  private subscriptions = new Map<number, () => void>(); // Отслеживание подписок для правильной очистки
+  private subscriptions = new Map<number, { unsubscribe: () => void }>(); // Отслеживание подписок для правильной очистки
 
   async getActor(userId: number): Promise<BotActor> {
     if (this.actors.has(userId)) {
@@ -23,6 +23,10 @@ export class StateService {
 
       let actor: BotActor = createActor(botMachine);
       actor.start();
+
+      // Проверяем изоляцию контекста актора
+      const initialSnapshot = actor.getSnapshot();
+      logger.debug(`Created actor for user ${userId} with initial scene: ${initialSnapshot.context.scene}`);
 
       if (stateJson) {
         // Восстанавливаем состояние через события
@@ -94,10 +98,10 @@ export class StateService {
       }
 
       // Удаляем старую подписку, если она существует (на случай пересоздания актора)
-      const oldUnsubscribe = this.subscriptions.get(userId);
-      if (oldUnsubscribe) {
+      const oldSubscription = this.subscriptions.get(userId);
+      if (oldSubscription) {
         logger.warn(`Removing old subscription for user ${userId}`);
-        oldUnsubscribe();
+        oldSubscription.unsubscribe();
       }
 
       // Создаем новую подписку с явным использованием userId
@@ -111,7 +115,10 @@ export class StateService {
       this.subscriptions.set(userId, unsubscribe);
       this.actors.set(userId, actor);
       
-      logger.debug(`Created actor and subscription for user ${userId}`);
+      // Финальная проверка изоляции
+      const finalSnapshot = actor.getSnapshot();
+      logger.debug(`Actor and subscription created for user ${userId}. Final scene: ${finalSnapshot.context.scene}`);
+      
       return actor;
     } catch (error) {
       logger.error(`Error restoring state for user ${userId}:`, error);
@@ -119,10 +126,14 @@ export class StateService {
       const actor = createActor(botMachine);
       actor.start();
       
+      // Проверяем изоляцию контекста актора
+      const errorSnapshot = actor.getSnapshot();
+      logger.debug(`Created fallback actor for user ${userId} with scene: ${errorSnapshot.context.scene}`);
+      
       // Удаляем старую подписку, если она существует
-      const oldUnsubscribe = this.subscriptions.get(userId);
-      if (oldUnsubscribe) {
-        oldUnsubscribe();
+      const oldSubscription = this.subscriptions.get(userId);
+      if (oldSubscription) {
+        oldSubscription.unsubscribe();
       }
       
       // Создаем подписку для нового актора

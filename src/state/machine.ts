@@ -26,9 +26,9 @@ export const botMachine = setup({
 }).createMachine({
   id: 'bot',
   initial: 'start',
-  context: {
-    scene: 'start',
-  },
+  context: () => ({
+    scene: 'start' as Scene,
+  }),
   states: {
     start: {
       entry: ({ context }) => {
