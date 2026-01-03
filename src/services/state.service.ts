@@ -8,6 +8,7 @@ import type { Scene } from '../state/types.js';
 
 export class StateService {
   private actors = new Map<number, BotActor>();
+  private subscriptions = new Map<number, () => void>(); // Отслеживание подписок для правильной очистки
 
   async getActor(userId: number): Promise<BotActor> {
     if (this.actors.has(userId)) {
@@ -92,18 +93,45 @@ export class StateService {
         logger.debug(`No saved state found in Redis for user ${userId}, using default state`);
       }
 
-      // Сохраняем состояние при каждом изменении
-      actor.subscribe((snapshot) => {
-        this.saveState(userId, snapshot);
+      // Удаляем старую подписку, если она существует (на случай пересоздания актора)
+      const oldUnsubscribe = this.subscriptions.get(userId);
+      if (oldUnsubscribe) {
+        logger.warn(`Removing old subscription for user ${userId}`);
+        oldUnsubscribe();
+      }
+
+      // Создаем новую подписку с явным использованием userId
+      // Важно: используем userId из параметра функции, а не из замыкания
+      const currentUserId = userId; // Явно сохраняем userId для подписки
+      const unsubscribe = actor.subscribe((snapshot) => {
+        // Используем сохраненный currentUserId, чтобы избежать проблем с замыканием
+        this.saveState(currentUserId, snapshot);
       });
 
+      this.subscriptions.set(userId, unsubscribe);
       this.actors.set(userId, actor);
+      
+      logger.debug(`Created actor and subscription for user ${userId}`);
       return actor;
     } catch (error) {
       logger.error(`Error restoring state for user ${userId}:`, error);
       // Создаем новый актор в случае ошибки
       const actor = createActor(botMachine);
       actor.start();
+      
+      // Удаляем старую подписку, если она существует
+      const oldUnsubscribe = this.subscriptions.get(userId);
+      if (oldUnsubscribe) {
+        oldUnsubscribe();
+      }
+      
+      // Создаем подписку для нового актора
+      const currentUserId = userId;
+      const unsubscribe = actor.subscribe((snapshot) => {
+        this.saveState(currentUserId, snapshot);
+      });
+      
+      this.subscriptions.set(userId, unsubscribe);
       this.actors.set(userId, actor);
       return actor;
     }
@@ -114,12 +142,33 @@ export class StateService {
       const stateKey = getStateKey(userId);
       const scene = snapshot.context.scene as Scene;
 
+      // Валидация: проверяем, что userId корректный
+      if (!userId || userId <= 0) {
+        logger.error(`Invalid userId in saveState: ${userId}`);
+        return;
+      }
+
+      // Валидация: проверяем, что scene корректный
+      if (!scene) {
+        logger.error(`Invalid scene in saveState for user ${userId}: ${scene}`);
+        return;
+      }
+
+      // Логируем сохранение для диагностики
+      logger.debug(`Saving state for user ${userId} to key ${stateKey}: ${scene}`);
+
       await redis.set(stateKey, JSON.stringify(scene));
       
       // Устанавливаем TTL на 30 дней
       await redis.expire(stateKey, 60 * 60 * 24 * 30);
       
-      logger.debug(`State saved for user ${userId}: ${scene}`);
+      // Проверяем, что состояние действительно сохранилось
+      const savedState = await redis.get(stateKey);
+      if (savedState !== JSON.stringify(scene)) {
+        logger.error(`State save verification failed for user ${userId}. Expected: ${JSON.stringify(scene)}, got: ${savedState}`);
+      } else {
+        logger.debug(`State successfully saved and verified for user ${userId}: ${scene}`);
+      }
     } catch (error) {
       logger.error(`Error saving state for user ${userId}:`, error);
     }
