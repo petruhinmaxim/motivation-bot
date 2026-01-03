@@ -1,6 +1,7 @@
 import type { Context, NextFunction } from 'grammy';
 import { InputFile, InlineKeyboard } from 'grammy';
 import { stateService } from '../services/state.service.js';
+import type { Scene } from '../state/types.js';
 import { userService } from '../services/user.service.js';
 import { challengeService } from '../services/challenge.service.js';
 import { idleTimerService } from '../services/idle-timer.service.js';
@@ -36,6 +37,27 @@ import sharp from 'sharp';
 
 // Максимальный размер файла для обработки (20 МБ)
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
+
+/**
+ * Вспомогательная функция для корректного перехода в состояние timezone.
+ * Если пользователь находится в состоянии, из которого нельзя напрямую перейти в timezone,
+ * сначала переводит его в begin, а затем в timezone.
+ */
+async function goToTimezone(userId: number): Promise<Scene> {
+  const currentScene = await stateService.getCurrentScene(userId);
+  
+  // Проверяем, можем ли мы напрямую перейти в timezone из текущего состояния
+  // GO_TO_TIMEZONE может быть обработан только из begin, tomorrow, monday
+  if (currentScene === 'begin' || currentScene === 'tomorrow' || currentScene === 'monday') {
+    // Можем напрямую перейти
+    return await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+  } else {
+    // Сначала переходим в begin, затем в timezone
+    logger.debug(`User ${userId} is in state ${currentScene}, transitioning through begin to timezone`);
+    await stateService.sendEvent(userId, { type: 'GO_TO_BEGIN' });
+    return await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+  }
+}
 
 export async function stateMiddleware(ctx: Context, next: NextFunction) {
   if (!ctx.from) {
@@ -178,8 +200,8 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           logger.debug(`Challenge created for user ${userId}`);
           
           // Переходим к сцене выбора часового пояса
-          // sendEvent теперь возвращает обновленное состояние и сохраняет его в Redis
-          const newScene = await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+          // Используем вспомогательную функцию для корректного перехода
+          const newScene = await goToTimezone(userId);
           logger.info(`User ${userId} state changed to: ${newScene} after GO_TO_TIMEZONE event`);
           
           // Проверяем, что состояние действительно обновилось
@@ -187,7 +209,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           if (verifyScene !== 'timezone') {
             logger.error(`State mismatch after GO_TO_TIMEZONE for user ${userId}. Expected: timezone, got: ${verifyScene}. Retrying...`);
             // Пытаемся восстановить состояние
-            const retryScene = await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+            const retryScene = await goToTimezone(userId);
             logger.info(`User ${userId} state after retry: ${retryScene}`);
           }
           
@@ -245,14 +267,14 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           await challengeService.createOrUpdateChallenge(userId, 30);
           
           // Переходим к сцене выбора часового пояса
-          // sendEvent теперь возвращает обновленное состояние и сохраняет его в Redis
-          const newScene = await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+          // Используем вспомогательную функцию для корректного перехода
+          const newScene = await goToTimezone(userId);
           
           // Проверяем, что состояние действительно обновилось
           if (newScene !== 'timezone') {
             logger.error(`State mismatch after GO_TO_TIMEZONE for user ${userId}. Expected: timezone, got: ${newScene}. Retrying...`);
             // Пытаемся восстановить состояние
-            await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+            await goToTimezone(userId);
           }
           
           // Обновляем сцену в таймере (переход между сценами регистрации - таймер продолжает идти)
@@ -287,14 +309,14 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           await challengeService.createOrUpdateChallenge(userId, 30);
           
           // Переходим к сцене выбора часового пояса
-          // sendEvent теперь возвращает обновленное состояние и сохраняет его в Redis
-          const newScene = await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+          // Используем вспомогательную функцию для корректного перехода
+          const newScene = await goToTimezone(userId);
           
           // Проверяем, что состояние действительно обновилось
           if (newScene !== 'timezone') {
             logger.error(`State mismatch after GO_TO_TIMEZONE for user ${userId}. Expected: timezone, got: ${newScene}. Retrying...`);
             // Пытаемся восстановить состояние
-            await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+            await goToTimezone(userId);
           }
           
           // Обновляем сцену в таймере (переход между сценами регистрации - таймер продолжает идти)
@@ -464,7 +486,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           const sceneAfterError = await stateService.getCurrentScene(userId);
           if (sceneAfterError !== 'timezone') {
             logger.warn(`Scene lost after timezone parse error for user ${userId}. Expected: timezone, got: ${sceneAfterError}. Restoring to timezone.`);
-            await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+            await goToTimezone(userId);
           }
           await ctx.reply(MESSAGES.TIMEZONE.PARSE_ERROR);
           return;
