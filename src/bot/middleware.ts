@@ -1,5 +1,5 @@
 import type { Context, NextFunction } from 'grammy';
-import { InputFile } from 'grammy';
+import { InputFile, InlineKeyboard } from 'grammy';
 import { stateService } from '../services/state.service.js';
 import { userService } from '../services/user.service.js';
 import { challengeService } from '../services/challenge.service.js';
@@ -24,13 +24,14 @@ import {
 import { missedWorkoutReportService } from '../services/missed-workout-report.service.js';
 import { feedbackService } from '../services/feedback.service.js';
 import { buttonLogService } from '../services/button-log.service.js';
-import { MESSAGES } from '../scenes/messages.js';
+import { MESSAGES, BUTTONS } from '../scenes/messages.js';
 import { schedulerService } from '../services/scheduler.service.js';
 import { validateTime } from '../utils/time-validator.js';
 import { processImage } from '../utils/image-processor.js';
 import { getRandomMotivationalPhrase } from '../utils/motivational-phrases.js';
 import { getCurrentDateString } from '../utils/date-utils.js';
 import { env } from '../utils/env.js';
+import { bot } from './bot.js';
 import sharp from 'sharp';
 
 // Максимальный размер файла для обработки (20 МБ)
@@ -70,6 +71,63 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       idleTimerService.cancelIdleTimer(userId);
       await stateService.sendEvent(userId, { type: 'GO_TO_START' });
       await handleStartScene(ctx);
+      return;
+    }
+
+    // Обрабатываем команду sendAllUsers
+    if (ctx.message?.text && ctx.message.text.startsWith('sendAllUsers')) {
+      const messageText = ctx.message.text;
+      const lines = messageText.split('\n');
+      
+      // Извлекаем текст после команды (все строки после первой)
+      const textToSend = lines.slice(1).join('\n').trim();
+      
+      if (!textToSend) {
+        await ctx.reply('Пожалуйста, укажите текст для отправки после команды sendAllUsers');
+        return;
+      }
+
+      try {
+        // Получаем всех активных пользователей
+        const activeUsers = await userService.getAllActiveUsers();
+        
+        // Создаем клавиатуру с кнопкой "к челленджу"
+        const keyboard = new InlineKeyboard()
+          .text(BUTTONS.TO_CHALLENGE, 'challenge_stats');
+
+        let successCount = 0;
+        let errorCount = 0;
+
+        // Отправляем сообщение всем пользователям
+        for (const user of activeUsers) {
+          try {
+            await bot.api.sendMessage(user.id, textToSend, {
+              reply_markup: keyboard,
+            });
+            successCount++;
+          } catch (error: any) {
+            errorCount++;
+            // Логируем ошибки, но продолжаем отправку остальным
+            logger.warn(`Failed to send message to user ${user.id}:`, error.message || error);
+            
+            // Если пользователь заблокировал бота, помечаем его как заблокированного
+            if (error.error_code === 403 || error.description?.includes('blocked')) {
+              await userService.markUserAsBlocked(user.id);
+            }
+          }
+        }
+
+        // Отправляем подтверждение отправителю
+        await ctx.reply(
+          `✅ Сообщение отправлено ${successCount} пользователям${errorCount > 0 ? ` (ошибок: ${errorCount})` : ''}`
+        );
+        
+        logger.info(`User ${userId} sent message to all users. Success: ${successCount}, Errors: ${errorCount}`);
+      } catch (error) {
+        logger.error(`Error sending message to all users:`, error);
+        await ctx.reply('Произошла ошибка при отправке сообщения всем пользователям');
+      }
+      
       return;
     }
 

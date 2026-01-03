@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../database/client.js';
 import { users } from '../database/schema.js';
 import logger from '../utils/logger.js';
@@ -135,6 +135,29 @@ export class UserService {
       logger.error(`Error getting or setting default timezone for user ${userId}:`, error);
       // В случае ошибки возвращаем МСК по умолчанию
       return 3;
+    }
+  }
+
+  /**
+   * Получает всех активных пользователей (не заблокированных и не ботов)
+   * @returns Массив активных пользователей
+   */
+  async getAllActiveUsers() {
+    try {
+      const result = await db
+        .select()
+        .from(users)
+        .where(
+          and(
+            eq(users.isBot, false),
+            isNull(users.blockedAt)
+          )
+        );
+
+      return result;
+    } catch (error) {
+      logger.error('Error getting all active users:', error);
+      throw error;
     }
   }
 }
