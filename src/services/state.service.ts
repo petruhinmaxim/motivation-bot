@@ -119,9 +119,16 @@ export class StateService {
     return snapshot.context.scene;
   }
 
-  async sendEvent(userId: number, event: any): Promise<void> {
+  async sendEvent(userId: number, event: any): Promise<Scene> {
     const actor = await this.getActor(userId);
+    
+    // Отправляем событие
+    // XState обрабатывает события синхронно, поэтому состояние обновится сразу
     actor.send(event);
+    
+    // Получаем обновленное состояние сразу после отправки события
+    const snapshot = actor.getSnapshot();
+    return snapshot.context.scene;
   }
 }
 

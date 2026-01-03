@@ -155,12 +155,13 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       }
 
       if (data === 'begin') {
-        await stateService.sendEvent(userId, { type: 'GO_TO_BEGIN' });
+        // sendEvent теперь возвращает обновленное состояние
+        const newScene = await stateService.sendEvent(userId, { type: 'GO_TO_BEGIN' });
         // Если таймер уже активен - обновляем сцену, иначе запускаем новый
         if (idleTimerService.hasActiveTimer(userId)) {
-          idleTimerService.updateScene(userId, 'begin');
+          idleTimerService.updateScene(userId, newScene);
         } else {
-          idleTimerService.startIdleTimer(userId, 'begin');
+          idleTimerService.startIdleTimer(userId, newScene);
         }
         await handleBeginScene(ctx);
         return;
@@ -172,12 +173,13 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           await challengeService.createOrUpdateChallenge(userId, 30);
           
           // Переходим к сцене выбора часового пояса
-          await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+          // sendEvent теперь возвращает обновленное состояние
+          const newScene = await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
           // Обновляем сцену в таймере (переход между сценами регистрации - таймер продолжает идти)
           if (idleTimerService.hasActiveTimer(userId)) {
-            idleTimerService.updateScene(userId, 'timezone');
+            idleTimerService.updateScene(userId, newScene);
           } else {
-            idleTimerService.startIdleTimer(userId, 'timezone');
+            idleTimerService.startIdleTimer(userId, newScene);
           }
           await handleTimezoneScene(ctx);
         } catch (error: any) {
@@ -223,12 +225,13 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           await challengeService.createOrUpdateChallenge(userId, 30);
           
           // Переходим к сцене выбора часового пояса
-          await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+          // sendEvent теперь возвращает обновленное состояние
+          const newScene = await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
           // Обновляем сцену в таймере (переход между сценами регистрации - таймер продолжает идти)
           if (idleTimerService.hasActiveTimer(userId)) {
-            idleTimerService.updateScene(userId, 'timezone');
+            idleTimerService.updateScene(userId, newScene);
           } else {
-            idleTimerService.startIdleTimer(userId, 'timezone');
+            idleTimerService.startIdleTimer(userId, newScene);
           }
           await handleTimezoneScene(ctx);
         } catch (error: any) {
@@ -256,12 +259,13 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           await challengeService.createOrUpdateChallenge(userId, 30);
           
           // Переходим к сцене выбора часового пояса
-          await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
+          // sendEvent теперь возвращает обновленное состояние
+          const newScene = await stateService.sendEvent(userId, { type: 'GO_TO_TIMEZONE' });
           // Обновляем сцену в таймере (переход между сценами регистрации - таймер продолжает идти)
           if (idleTimerService.hasActiveTimer(userId)) {
-            idleTimerService.updateScene(userId, 'timezone');
+            idleTimerService.updateScene(userId, newScene);
           } else {
-            idleTimerService.startIdleTimer(userId, 'timezone');
+            idleTimerService.startIdleTimer(userId, newScene);
           }
           await handleTimezoneScene(ctx);
         } catch (error: any) {
@@ -388,6 +392,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       
       // Если пользователь ожидал фото, но отправил текст, возвращаем в статистику
       if (currentScene === 'waiting_for_photo') {
+        // sendEvent теперь возвращает обновленное состояние
         await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
         await handleChallengeStatsScene(ctx);
         return;
@@ -401,12 +406,13 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           // Сохраняем timezone
           await userService.updateTimezone(userId, timezone);
           // Переходим к сцене выбора времени напоминаний
-          await stateService.sendEvent(userId, { type: 'GO_TO_REMINDER_TIME' });
+          // sendEvent теперь возвращает обновленное состояние
+          const newScene = await stateService.sendEvent(userId, { type: 'GO_TO_REMINDER_TIME' });
           // Обновляем сцену в таймере (переход между сценами регистрации - таймер продолжает идти)
           if (idleTimerService.hasActiveTimer(userId)) {
-            idleTimerService.updateScene(userId, 'reminder_time');
+            idleTimerService.updateScene(userId, newScene);
           } else {
-            idleTimerService.startIdleTimer(userId, 'reminder_time');
+            idleTimerService.startIdleTimer(userId, newScene);
           }
           await handleReminderTimeScene(ctx);
           return;
@@ -427,6 +433,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           // Отправляем уведомление об успехе
           await ctx.reply(MESSAGES.TIMEZONE.UPDATED);
           // Возвращаемся в настройки
+          // sendEvent теперь возвращает обновленное состояние
           await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_SETTINGS' });
           await handleChallengeSettingsScene(ctx);
           return;
@@ -457,6 +464,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           idleTimerService.cancelIdleTimer(userId);
           
           // Переходим к сцене правил челленджа
+          // sendEvent теперь возвращает обновленное состояние
           await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_RULES' });
           await handleChallengeRulesScene(ctx);
           return;
@@ -486,6 +494,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           // Отправляем уведомление об успехе
           await ctx.reply(MESSAGES.TIME.UPDATED);
           // Возвращаемся в настройки
+          // sendEvent теперь возвращает обновленное состояние
           await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_SETTINGS' });
           await handleChallengeSettingsScene(ctx);
           return;
