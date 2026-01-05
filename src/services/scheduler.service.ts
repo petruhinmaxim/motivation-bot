@@ -9,6 +9,8 @@ import {
   getDailyReminderDataKey,
   getMidnightChecksKey,
   getMidnightCheckDataKey,
+  getReminderLockKey,
+  getLastMissedDayNotificationKey,
 } from '../redis/keys.js';
 import { getRandomReminderPhrase } from '../utils/motivational-phrases.js';
 import { handleChallengeStatsScene } from '../scenes/challenge-stats.scene.js';
@@ -161,10 +163,32 @@ class SchedulerService {
 
       for (const reminder of reminders) {
         try {
-          // Проверяем, не запланировано ли уже напоминание для этого пользователя
+          // Проверяем, не запланировано ли уже напоминание для этого пользователя в памяти
           if (this.dailyReminders.has(reminder.userId)) {
-            logger.warn(`Daily reminder already scheduled for user ${reminder.userId}, skipping restore`);
+            logger.warn(`Daily reminder already scheduled in memory for user ${reminder.userId}, skipping restore`);
             continue;
+          }
+
+          // Дополнительная проверка: проверяем, есть ли активное напоминание в Redis
+          const reminderDataKey = getDailyReminderDataKey(reminder.userId);
+          const existingReminderData = await redis.get(reminderDataKey);
+          if (existingReminderData) {
+            try {
+              const existingReminder: DailyReminderData = JSON.parse(existingReminderData);
+              const scheduledTime = new Date(existingReminder.scheduledTime);
+              const now = new Date();
+              
+              // Если напоминание еще не должно было выполниться, пропускаем восстановление
+              // (возможно, оно уже запланировано в другом экземпляре)
+              if (scheduledTime > now) {
+                logger.debug(
+                  `Daily reminder already exists in Redis for user ${reminder.userId} (scheduled for ${scheduledTime.toISOString()}), skipping restore`
+                );
+                continue;
+              }
+            } catch (parseError) {
+              logger.warn(`Error parsing existing reminder data for user ${reminder.userId}, continuing restore:`, parseError);
+            }
           }
 
           // Проверяем, что челлендж все еще активен
@@ -655,9 +679,30 @@ class SchedulerService {
       let initializedCount = 0;
 
       for (const challenge of activeChallenges) {
-        // Пропускаем, если напоминание уже запланировано
+        // Пропускаем, если напоминание уже запланировано в памяти
         if (this.dailyReminders.has(challenge.userId)) {
           continue;
+        }
+
+        // Дополнительная проверка: проверяем, есть ли активное напоминание в Redis
+        const reminderDataKey = getDailyReminderDataKey(challenge.userId);
+        const existingReminderData = await redis.get(reminderDataKey);
+        if (existingReminderData) {
+          try {
+            const existingReminder: DailyReminderData = JSON.parse(existingReminderData);
+            const scheduledTime = new Date(existingReminder.scheduledTime);
+            const now = new Date();
+            
+            // Если напоминание уже запланировано и еще не должно было выполниться, пропускаем
+            if (scheduledTime > now) {
+              logger.debug(
+                `Daily reminder already exists in Redis for user ${challenge.userId} (scheduled for ${scheduledTime.toISOString()}), skipping initialization`
+              );
+              continue;
+            }
+          } catch (parseError) {
+            logger.warn(`Error parsing existing reminder data for user ${challenge.userId}, continuing initialization:`, parseError);
+          }
         }
 
         // Планируем ежедневное напоминание (используем время из челленджа или null для 12:00 МСК)
@@ -704,24 +749,27 @@ class SchedulerService {
 
         // Если напоминание отсутствует и в памяти, и в Redis - восстанавливаем
         if (!hasInMemory && !hasInRedis) {
-          logger.warn(`Reminder missing for user ${challenge.userId}, restoring...`);
+          logger.warn(`Reminder missing for user ${challenge.userId} (not in memory or Redis), restoring...`);
           try {
             const reminderTime = challenge.reminderTime || null;
             await this.scheduleDailyReminder(challenge.userId, reminderTime);
             restoredCount++;
+            logger.info(`Restored missing reminder for user ${challenge.userId}`);
           } catch (error) {
             logger.error(`Error restoring reminder for user ${challenge.userId}:`, error);
           }
         } else if (hasInRedis && !hasInMemory) {
-          // Напоминание есть в Redis, но не в памяти - восстанавливаем из Redis
-          logger.warn(`Reminder exists in Redis but not in memory for user ${challenge.userId}, restoring...`);
+          // Напоминание есть в Redis, но не в памяти - проверяем, нужно ли восстанавливать
           try {
             const reminderData: DailyReminderData = JSON.parse(reminderDataJson!);
             const scheduledTime = new Date(reminderData.scheduledTime);
             const now = new Date();
             
-            // Если время еще не прошло, планируем
+            // Если время еще не прошло, восстанавливаем из Redis
             if (scheduledTime > now) {
+              logger.warn(
+                `Reminder exists in Redis but not in memory for user ${challenge.userId} (scheduled for ${scheduledTime.toISOString()}), restoring...`
+              );
               const delay = scheduledTime.getTime() - now.getTime();
               await this.scheduleDailyReminderInternal(
                 challenge.userId,
@@ -730,18 +778,45 @@ class SchedulerService {
                 delay
               );
               restoredCount++;
+              logger.info(`Restored reminder from Redis for user ${challenge.userId}`);
             } else {
               // Время прошло, планируем следующее
+              logger.warn(
+                `Reminder in Redis expired for user ${challenge.userId} (was scheduled for ${scheduledTime.toISOString()}), scheduling next...`
+              );
               await this.scheduleDailyReminder(challenge.userId, reminderData.reminderTime);
               restoredCount++;
+              logger.info(`Scheduled next reminder for user ${challenge.userId}`);
             }
           } catch (error) {
             logger.error(`Error restoring reminder from Redis for user ${challenge.userId}:`, error);
           }
+        } else if (hasInMemory && !hasInRedis) {
+          // Напоминание есть в памяти, но не в Redis - синхронизируем с Redis
+          logger.warn(`Reminder exists in memory but not in Redis for user ${challenge.userId}, syncing...`);
+          try {
+            const reminder = this.dailyReminders.get(challenge.userId);
+            if (reminder) {
+              const reminderTime = challenge.reminderTime || null;
+              const userTimezone = await userService.getOrSetDefaultTimezone(challenge.userId);
+              await this.saveDailyReminderToRedis(
+                challenge.userId,
+                reminderTime || '12:00',
+                userTimezone,
+                reminder.scheduledTime
+              );
+              logger.info(`Synced reminder to Redis for user ${challenge.userId}`);
+            }
+          } catch (error) {
+            logger.error(`Error syncing reminder to Redis for user ${challenge.userId}:`, error);
+          }
         }
+        // Если напоминание есть и в памяти, и в Redis - все в порядке, пропускаем
       }
 
-      logger.info(`Health check completed: checked ${checkedCount} challenges, restored ${restoredCount} reminders`);
+      logger.info(
+        `Health check completed: checked ${checkedCount} challenges, restored ${restoredCount} reminders`
+      );
     } catch (error) {
       logger.error('Error in verifyAndRestoreReminders:', error);
     }
@@ -861,7 +936,7 @@ class SchedulerService {
     delay: number
   ): Promise<void> {
     logger.info(
-      `Scheduling daily reminder for user ${userId} at ${scheduledTime.toISOString()} (in ${Math.round(delay / 1000)}s)`
+      `Scheduling daily reminder for user ${userId} at ${scheduledTime.toISOString()} (in ${Math.round(delay / 1000)}s, reminderTime: ${reminderTime || '12:00 MSK'})`
     );
 
     const timeoutId = setTimeout(async () => {
@@ -996,32 +1071,93 @@ class SchedulerService {
 
       // Проверяем, есть ли пропущенные дни
       if (challenge.daysWithoutWorkout > 0) {
-        // Отправляем сообщение о пропущенной тренировке (всегда, даже если уведомления отключены)
-        const missedWorkoutText = 
-          'Вчера ты дал жиру отдохнуть. Поделишься своим отчётом? Отправь его в чат, я сохраню, и по завершению челленджа ты увидишь, где были сложности и как прогрессировал.';
+        // Используем Redis lock для предотвращения дубликатов при параллельных вызовах
+        const lockKey = getReminderLockKey(userId);
+        const lockValue = Date.now().toString();
+        const lockTTL = 300; // 5 минут блокировка
         
+        // Пытаемся получить блокировку
+        const lockAcquired = await redis.set(lockKey, lockValue, 'EX', lockTTL, 'NX');
+        
+        if (!lockAcquired) {
+          logger.warn(`Reminder lock already exists for user ${userId}, skipping duplicate notification`);
+          // Планируем следующее напоминание даже если не отправили (чтобы не пропустить следующее)
+          const actualReminderTime = challenge.reminderTime || null;
+          await this.scheduleDailyReminder(userId, actualReminderTime);
+          return;
+        }
+
         try {
-          // Пытаемся отправить фото для пропущенного дня
+          // Проверяем время последней отправки уведомления о пропущенном дне
+          // Предотвращаем повторную отправку в течение 1 часа
+          const lastSentKey = getLastMissedDayNotificationKey(userId);
+          const lastSentTimestamp = await redis.get(lastSentKey);
+          const now = Date.now();
+          const oneHourMs = 60 * 60 * 1000;
+          
+          if (lastSentTimestamp) {
+            const lastSent = parseInt(lastSentTimestamp, 10);
+            const timeSinceLastSent = now - lastSent;
+            
+            if (timeSinceLastSent < oneHourMs) {
+              logger.warn(
+                `Missed day notification was sent ${Math.round(timeSinceLastSent / 1000 / 60)} minutes ago for user ${userId}, skipping duplicate`
+              );
+              // Освобождаем блокировку
+              await redis.del(lockKey);
+              // Планируем следующее напоминание
+              const actualReminderTime = challenge.reminderTime || null;
+              await this.scheduleDailyReminder(userId, actualReminderTime);
+              return;
+            }
+          }
+
+          // Отправляем сообщение о пропущенной тренировке (всегда, даже если уведомления отключены)
+          const missedWorkoutText = 
+            'Вчера ты дал жиру отдохнуть. Поделишься своим отчётом? Отправь его в чат, я сохраню, и по завершению челленджа ты увидишь, где были сложности и как прогрессировал.';
+          
           try {
-            const imagePath = getMissedDayImagePath(challenge.daysWithoutWorkout);
-            const photo = new InputFile(imagePath);
-            await this.botApi.sendPhoto(userId, photo, {
-              caption: missedWorkoutText,
+            // Пытаемся отправить фото для пропущенного дня
+            try {
+              const imagePath = getMissedDayImagePath(challenge.daysWithoutWorkout);
+              const photo = new InputFile(imagePath);
+              await this.botApi.sendPhoto(userId, photo, {
+                caption: missedWorkoutText,
+              });
+              logger.info(`Missed workout reminder with photo sent to user ${userId} (day ${challenge.daysWithoutWorkout})`);
+            } catch (photoError) {
+              // Если не удалось отправить фото, отправляем только текст
+              logger.warn(`Failed to send missed day photo for user ${userId}, sending text only:`, photoError);
+              await this.botApi.sendMessage(userId, missedWorkoutText);
+              logger.info(`Missed workout reminder (text only) sent to user ${userId}`);
+            }
+            
+            // Сохраняем время отправки (TTL 24 часа)
+            await redis.set(lastSentKey, now.toString(), 'EX', 86400);
+            logger.debug(`Saved last missed day notification time for user ${userId}`);
+          } catch (error) {
+            const shouldCancel = handleTelegramError(error, userId);
+            if (shouldCancel) {
+              this.cancelDailyReminder(userId);
+              this.cancelMidnightCheck(userId);
+              // Освобождаем блокировку при ошибке
+              await redis.del(lockKey).catch((err) => {
+                logger.error(`Error releasing lock for user ${userId}:`, err);
+              });
+              return;
+            }
+            throw error;
+          } finally {
+            // Освобождаем блокировку после отправки
+            await redis.del(lockKey).catch((err) => {
+              logger.error(`Error releasing lock for user ${userId}:`, err);
             });
-            logger.info(`Missed workout reminder with photo sent to user ${userId} (day ${challenge.daysWithoutWorkout})`);
-          } catch (photoError) {
-            // Если не удалось отправить фото, отправляем только текст
-            logger.warn(`Failed to send missed day photo for user ${userId}, sending text only:`, photoError);
-            await this.botApi.sendMessage(userId, missedWorkoutText);
-            logger.info(`Missed workout reminder (text only) sent to user ${userId}`);
           }
         } catch (error) {
-          const shouldCancel = handleTelegramError(error, userId);
-          if (shouldCancel) {
-            this.cancelDailyReminder(userId);
-            this.cancelMidnightCheck(userId);
-            return;
-          }
+          // Освобождаем блокировку при ошибке
+          await redis.del(lockKey).catch((err) => {
+            logger.error(`Error releasing lock for user ${userId}:`, err);
+          });
           throw error;
         }
         

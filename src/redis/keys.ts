@@ -20,3 +20,7 @@ export const getMidnightCheckDataKey = (userId: number): string => `scheduler:mi
 // Ключи для таймеров бездействия
 export const getIdleTimerKey = (userId: number): string => `idle_timer:${userId}`;
 
+// Ключи для блокировок отправки уведомлений (предотвращение дубликатов)
+export const getReminderLockKey = (userId: number): string => `reminder:lock:${userId}`;
+export const getLastMissedDayNotificationKey = (userId: number): string => `missed_day:last_sent:${userId}`;
+
