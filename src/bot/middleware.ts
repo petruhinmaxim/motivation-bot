@@ -14,6 +14,7 @@ import {
   handleTomorrowScene,
   handleMondayScene,
   handleTimezoneScene,
+  handleReminderTimeScene,
   handleChallengeRulesScene,
   handleChallengeStatsScene,
   handleChallengeSettingsScene,
@@ -472,9 +473,9 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           await notificationService.rescheduleMissedDaysCheck(userId, timezone);
           // Отменяем таймер бездействия при выходе из процесса регистрации
           idleTimerService.cancelIdleTimer(userId);
-          // Переходим к сцене правил челленджа
-          await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_RULES' });
-          await handleChallengeRulesScene(ctx);
+          // Переходим к сцене установки времени уведомлений
+          await stateService.sendEvent(userId, { type: 'GO_TO_REMINDER_TIME' });
+          await handleReminderTimeScene(ctx);
           return;
         } else {
           // Не удалось распарсить, просим повторить
@@ -802,6 +803,38 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         }
       }
       
+      // Обрабатываем установку времени напоминаний при создании челленджа
+      if (currentScene === 'reminder_time') {
+        const validation = validateTime(ctx.message.text);
+        
+        if (validation.isValid && validation.time) {
+          // Сохраняем время напоминаний
+          await challengeService.updateReminderTime(userId, validation.time);
+          
+          // Перепланируем ежедневное уведомление
+          const user = await userService.getUser(userId);
+          const timezone = user?.timezone ?? 3;
+          await notificationService.scheduleDailyReminder(userId, validation.time, timezone);
+          
+          // Отменяем таймер бездействия при выходе из процесса регистрации
+          idleTimerService.cancelIdleTimer(userId);
+          // Переходим к сцене правил челленджа
+          await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_RULES' });
+          await handleChallengeRulesScene(ctx);
+          return;
+        } else {
+          // Не удалось распарсить, просим повторить
+          // Важно: после ошибки пользователь должен остаться в сцене reminder_time
+          const sceneAfterError = await stateService.getCurrentScene(userId);
+          if (sceneAfterError !== 'reminder_time') {
+            logger.warn(`Scene lost after reminder_time parse error for user ${userId}, restoring to reminder_time`);
+            await stateService.sendEvent(userId, { type: 'GO_TO_REMINDER_TIME' });
+          }
+          await ctx.reply(MESSAGES.TIME.PARSE_ERROR);
+          return;
+        }
+      }
+
       // Обрабатываем редактирование времени напоминаний из настроек
       if (currentScene === 'edit_reminder_time') {
         const validation = validateTime(ctx.message.text);
@@ -829,7 +862,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       }
 
       // Проверяем, что пользователь не в другой специальной сцене
-      const specialScenes = ['timezone', 'edit_timezone', 'edit_reminder_time', 'waiting_for_photo'];
+      const specialScenes = ['timezone', 'reminder_time', 'edit_timezone', 'edit_reminder_time', 'waiting_for_photo'];
       if (!specialScenes.includes(currentScene)) {
         // Проверяем, есть ли активный челлендж и пропущенные дни
         const challenge = await challengeService.getActiveChallenge(userId);
