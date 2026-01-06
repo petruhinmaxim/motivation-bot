@@ -3,7 +3,7 @@ import { bot } from './bot/bot.js';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { db, closeDatabase } from './database/client.js';
 import logger from './utils/logger.js';
-import { schedulerService } from './services/scheduler.service.js';
+import { notificationService } from './services/notification.service.js';
 import { closeRedis } from './redis/client.js';
 
 dotenv.config();
@@ -29,9 +29,6 @@ async function shutdown(signal: string): Promise<void> {
     logger.info('Stopping bot...');
     await bot.stop();
     logger.info('Bot stopped');
-
-    // Останавливаем периодическую проверку напоминаний
-    schedulerService.stopHealthCheck();
 
     // Закрываем соединения с БД и Redis
     logger.info('Closing database connections...');
@@ -63,14 +60,10 @@ async function start() {
     await bot.start();
     logger.info('✅ Bot is running!');
 
-    // Восстанавливаем запланированные задачи из Redis
-    logger.info('Restoring scheduled tasks...');
-    await schedulerService.restoreTasks();
-    logger.info('✅ Scheduled tasks restored');
-
-    // Запускаем периодическую проверку напоминаний (каждые 12 часов)
-    schedulerService.startHealthCheck(12);
-    logger.info('✅ Reminder health check started');
+    // Восстанавливаем уведомления из Redis
+    logger.info('Restoring notifications...');
+    await notificationService.restoreNotifications();
+    logger.info('✅ Notifications restored');
   } catch (error) {
     logger.error('Failed to start application:', error);
     await shutdown('STARTUP_ERROR');

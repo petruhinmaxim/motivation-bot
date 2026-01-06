@@ -3,6 +3,7 @@ import { InlineKeyboard } from 'grammy';
 import { BUTTONS, MESSAGES, MESSAGE_FUNCTIONS } from './messages.js';
 import { challengeService } from '../services/challenge.service.js';
 import { userService } from '../services/user.service.js';
+import { notificationService } from '../services/notification.service.js';
 
 export async function handleChallengeStatsScene(ctx: Context) {
   const userId = ctx.from?.id;
@@ -39,6 +40,24 @@ export async function handleChallengeStatsScene(ctx: Context) {
   // Получаем часовой пояс пользователя
   const user = await userService.getUser(userId);
   const timezone = user?.timezone ?? null;
+
+  // Если уведомления включены и еще не запланированы - планируем
+  if (challenge.reminderStatus) {
+    if (!notificationService.hasDailyReminder(userId)) {
+      const userTimezone = user?.timezone ?? 3;
+      // Если время не установлено, используем 12:00 МСК по умолчанию
+      const reminderTime = challenge.reminderTime 
+        ? challenge.reminderTime.slice(0, 5) // HH:MM
+        : '12:00'; // По умолчанию 12:00 МСК
+      
+      // Если время не было установлено, сохраняем его
+      if (!challenge.reminderTime) {
+        await challengeService.updateReminderTime(userId, reminderTime);
+      }
+      
+      await notificationService.scheduleDailyReminder(userId, reminderTime, userTimezone);
+    }
+  }
 
   const messageText = MESSAGE_FUNCTIONS.CHALLENGE_STATS_TEXT(
     formattedStartDate,

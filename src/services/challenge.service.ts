@@ -5,6 +5,8 @@ import logger from '../utils/logger.js';
 import redis from '../redis/client.js';
 import { getPhotoUploadKey } from '../redis/keys.js';
 import { getYesterdayDateString, formatDateToString } from '../utils/date-utils.js';
+import { userService } from './user.service.js';
+import { notificationService } from './notification.service.js';
 
 export class ChallengeService {
   /**
@@ -66,6 +68,9 @@ export class ChallengeService {
       // Это необходимо, чтобы старые ключи не блокировали загрузку фото в новом челлендже
       await this.clearPhotoUploadKeys(userId);
 
+      // Получаем или устанавливаем часовой пояс по умолчанию (МСК)
+      const timezone = await userService.getOrSetDefaultTimezone(userId);
+
       // Создаем новую запись
       await db.insert(challenges).values({
         userId,
@@ -78,6 +83,9 @@ export class ChallengeService {
         reminderStatus: false,
       });
       logger.info(`Created new challenge for user ${userId} with duration ${duration} days`);
+
+      // Планируем проверку пропущенных дней
+      await notificationService.scheduleMissedDaysCheck(userId, timezone, startDate);
     } catch (error) {
       logger.error(`Error creating challenge for user ${userId}:`, error);
       throw error;
@@ -151,6 +159,35 @@ export class ChallengeService {
       throw error;
     }
   }
+
+  /**
+   * Включает напоминания для активного челленджа (использует сохраненное время или 12:00 МСК)
+   */
+  async enableReminders(userId: number): Promise<void> {
+    try {
+      const challenge = await this.getActiveChallenge(userId);
+      if (!challenge) {
+        throw new Error(`Active challenge not found for user ${userId}`);
+      }
+
+      // Если время не установлено, используем 12:00 МСК по умолчанию
+      const reminderTime = challenge.reminderTime || '12:00';
+
+      await db
+        .update(challenges)
+        .set({
+          reminderStatus: true,
+          reminderTime,
+          updatedAt: new Date(),
+        })
+        .where(eq(challenges.id, challenge.id));
+      logger.info(`Enabled reminders for user ${userId} with time ${reminderTime}`);
+    } catch (error) {
+      logger.error(`Error enabling reminders for user ${userId}:`, error);
+      throw error;
+    }
+  }
+
 
   /**
    * Проверяет, было ли уже загружено фото сегодня

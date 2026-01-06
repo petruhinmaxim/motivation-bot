@@ -6,21 +6,21 @@ export const getStateSnapshotKey = (userId: number): string => `user:${userId}:s
 export const getScheduledTasksKey = (): string => 'scheduler:tasks';
 export const getScheduledTaskDataKey = (userId: number): string => `scheduler:task:${userId}`;
 
-// Ключи для ежедневных напоминаний
-export const getDailyRemindersKey = (): string => 'scheduler:daily_reminders';
-export const getDailyReminderDataKey = (userId: number): string => `scheduler:daily_reminder:${userId}`;
-
 // Ключ для отслеживания загрузки фото за день (формат: YYYY-MM-DD)
 export const getPhotoUploadKey = (userId: number, date: string): string => `photo_upload:${userId}:${date}`;
-
-// Ключи для полночных проверок
-export const getMidnightChecksKey = (): string => 'scheduler:midnight_checks';
-export const getMidnightCheckDataKey = (userId: number): string => `scheduler:midnight_check:${userId}`;
 
 // Ключи для таймеров бездействия
 export const getIdleTimerKey = (userId: number): string => `idle_timer:${userId}`;
 
-// Ключи для блокировок отправки уведомлений (предотвращение дубликатов)
-export const getReminderLockKey = (userId: number): string => `reminder:lock:${userId}`;
-export const getLastMissedDayNotificationKey = (userId: number): string => `missed_day:last_sent:${userId}`;
+// Ключи для уведомлений
+export const getDailyReminderKey = (userId: number): string => `notification:daily:${userId}`;
+export const getDailyReminderDataKey = (userId: number): string => `notification:daily:data:${userId}`;
+export const getDailyRemindersListKey = (): string => 'notification:daily:list';
+
+export const getMissedCheckKey = (userId: number): string => `notification:missed:${userId}`;
+export const getMissedCheckDataKey = (userId: number): string => `notification:missed:data:${userId}`;
+export const getMissedChecksListKey = (): string => 'notification:missed:list';
+
+export const getNotificationLockKey = (userId: number): string => `notification:lock:${userId}`;
+export const getMissedNotificationSentKey = (userId: number): string => `notification:missed:sent:${userId}`;
 

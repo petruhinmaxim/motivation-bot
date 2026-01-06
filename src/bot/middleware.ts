@@ -14,7 +14,6 @@ import {
   handleTomorrowScene,
   handleMondayScene,
   handleTimezoneScene,
-  handleReminderTimeScene,
   handleChallengeRulesScene,
   handleChallengeStatsScene,
   handleChallengeSettingsScene,
@@ -27,6 +26,7 @@ import { feedbackService } from '../services/feedback.service.js';
 import { buttonLogService } from '../services/button-log.service.js';
 import { MESSAGES, BUTTONS } from '../scenes/messages.js';
 import { schedulerService } from '../services/scheduler.service.js';
+import { notificationService } from '../services/notification.service.js';
 import { validateTime } from '../utils/time-validator.js';
 import { processImage } from '../utils/image-processor.js';
 import { getRandomMotivationalPhrase } from '../utils/motivational-phrases.js';
@@ -394,7 +394,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       if (data === 'disable_reminders') {
         // Отключаем напоминания
         await challengeService.disableReminders(userId);
-        schedulerService.cancelDailyReminder(userId);
+        notificationService.cancelDailyReminder(userId);
         await ctx.answerCallbackQuery(MESSAGES.REMINDERS.DISABLED);
         await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_SETTINGS' });
         await handleChallengeSettingsScene(ctx);
@@ -402,34 +402,27 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       }
 
       if (data === 'enable_reminders') {
-        // Проверяем, установлен ли часовой пояс
-        const user = await userService.getUser(userId);
-        if (!user || user.timezone === null || user.timezone === undefined) {
-          await ctx.answerCallbackQuery('Сначала установите часовой пояс');
-          await stateService.sendEvent(userId, { type: 'GO_TO_EDIT_TIMEZONE' });
-          await handleEditTimezoneScene(ctx);
-          return;
-        }
-        
-        // Проверяем, есть ли сохраненное время уведомлений
+        // Включаем напоминания (используем старое время или 12:00 МСК по умолчанию)
         const challenge = await challengeService.getActiveChallenge(userId);
-        if (challenge?.reminderTime) {
-          // Если есть сохраненное время - сразу включаем уведомления
-          // Обрезаем время до формата HH:MM (на случай, если в БД хранится с секундами)
-          const reminderTime = challenge.reminderTime.slice(0, 5);
-          await challengeService.updateReminderTime(userId, reminderTime);
-          await schedulerService.scheduleDailyReminder(userId, reminderTime);
-          await schedulerService.scheduleMidnightCheck(userId);
-          await ctx.answerCallbackQuery('✅ Уведомления включены');
-          await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_SETTINGS' });
-          await handleChallengeSettingsScene(ctx);
+        if (!challenge) {
+          await ctx.answerCallbackQuery('Челлендж не найден');
           return;
         }
+
+        await challengeService.enableReminders(userId);
         
-        // Если времени нет - просим ввести
-        await ctx.answerCallbackQuery(MESSAGES.REMINDERS.SET_TIME_FIRST);
-        await stateService.sendEvent(userId, { type: 'GO_TO_EDIT_REMINDER_TIME' });
-        await handleEditReminderTimeScene(ctx);
+        // Получаем обновленный челлендж
+        const updatedChallenge = await challengeService.getActiveChallenge(userId);
+        if (updatedChallenge) {
+          const user = await userService.getUser(userId);
+          const timezone = user?.timezone ?? 3;
+          const reminderTime = updatedChallenge.reminderTime?.slice(0, 5) || '12:00';
+          await notificationService.scheduleDailyReminder(userId, reminderTime, timezone);
+        }
+        
+        await ctx.answerCallbackQuery('✅ Уведомления включены');
+        await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_SETTINGS' });
+        await handleChallengeSettingsScene(ctx);
         return;
       }
 
@@ -475,16 +468,13 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         if (timezone !== null) {
           // Сохраняем timezone
           await userService.updateTimezone(userId, timezone);
-          // Переходим к сцене выбора времени напоминаний
-          // sendEvent теперь возвращает обновленное состояние
-          const newScene = await stateService.sendEvent(userId, { type: 'GO_TO_REMINDER_TIME' });
-          // Обновляем сцену в таймере (переход между сценами регистрации - таймер продолжает идти)
-          if (idleTimerService.hasActiveTimer(userId)) {
-            idleTimerService.updateScene(userId, newScene);
-          } else {
-            idleTimerService.startIdleTimer(userId, newScene);
-          }
-          await handleReminderTimeScene(ctx);
+          // Перепланируем проверку пропущенных дней с новым часовым поясом
+          await notificationService.rescheduleMissedDaysCheck(userId, timezone);
+          // Отменяем таймер бездействия при выходе из процесса регистрации
+          idleTimerService.cancelIdleTimer(userId);
+          // Переходим к сцене правил челленджа
+          await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_RULES' });
+          await handleChallengeRulesScene(ctx);
           return;
         } else {
           // Не удалось распарсить, просим повторить
@@ -521,6 +511,13 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         if (timezone !== null) {
           // Сохраняем timezone
           await userService.updateTimezone(userId, timezone);
+          // Перепланируем проверку пропущенных дней с новым часовым поясом
+          await notificationService.rescheduleMissedDaysCheck(userId, timezone);
+          // Если уведомления включены - перепланируем и их
+          const challenge = await challengeService.getActiveChallenge(userId);
+          if (challenge?.reminderStatus && challenge.reminderTime) {
+            await notificationService.rescheduleDailyReminder(userId);
+          }
           // Отправляем уведомление об успехе
           await ctx.reply(MESSAGES.TIMEZONE.UPDATED);
           // Возвращаемся в настройки
@@ -542,66 +539,6 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         }
       }
 
-      // Обрабатываем время напоминаний только если пользователь в сцене reminder_time
-      if (currentScene === 'reminder_time') {
-        const validation = validateTime(ctx.message.text);
-        
-        if (validation.isValid && validation.time) {
-          // Сохраняем время напоминаний
-          await challengeService.updateReminderTime(userId, validation.time);
-          
-          // Получаем часовой пояс пользователя и планируем напоминание
-          const user = await userService.getUser(userId);
-          if (user?.timezone !== null && user?.timezone !== undefined) {
-            await schedulerService.scheduleDailyReminder(userId, validation.time);
-            // Планируем полночную проверку
-            await schedulerService.scheduleMidnightCheck(userId);
-          }
-          
-          // Отменяем таймер бездействия при выходе из процесса регистрации
-          idleTimerService.cancelIdleTimer(userId);
-          
-          // Переходим к сцене правил челленджа
-          // sendEvent теперь возвращает обновленное состояние
-          await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_RULES' });
-          await handleChallengeRulesScene(ctx);
-          return;
-        } else {
-          // Не удалось распарсить, просим повторить
-          await ctx.reply(MESSAGES.TIME.PARSE_ERROR);
-          return;
-        }
-      }
-
-      // Обрабатываем редактирование времени напоминаний из настроек
-      if (currentScene === 'edit_reminder_time') {
-        const validation = validateTime(ctx.message.text);
-        
-        if (validation.isValid && validation.time) {
-          // Сохраняем время напоминаний
-          await challengeService.updateReminderTime(userId, validation.time);
-          
-          // Получаем часовой пояс пользователя и перепланируем напоминание
-          const user = await userService.getUser(userId);
-          if (user?.timezone !== null && user?.timezone !== undefined) {
-            await schedulerService.scheduleDailyReminder(userId, validation.time);
-            // Перепланируем полночную проверку
-            await schedulerService.scheduleMidnightCheck(userId);
-          }
-          
-          // Отправляем уведомление об успехе
-          await ctx.reply(MESSAGES.TIME.UPDATED);
-          // Возвращаемся в настройки
-          // sendEvent теперь возвращает обновленное состояние
-          await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_SETTINGS' });
-          await handleChallengeSettingsScene(ctx);
-          return;
-        } else {
-          // Не удалось распарсить, просим повторить
-          await ctx.reply(MESSAGES.TIME.PARSE_ERROR_EDIT);
-          return;
-        }
-      }
     }
 
     // Вспомогательная функция для валидации изображения
@@ -865,8 +802,34 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         }
       }
       
+      // Обрабатываем редактирование времени напоминаний из настроек
+      if (currentScene === 'edit_reminder_time') {
+        const validation = validateTime(ctx.message.text);
+        
+        if (validation.isValid && validation.time) {
+          // Сохраняем время напоминаний
+          await challengeService.updateReminderTime(userId, validation.time);
+          
+          // Перепланируем ежедневное уведомление
+          const user = await userService.getUser(userId);
+          const timezone = user?.timezone ?? 3;
+          await notificationService.scheduleDailyReminder(userId, validation.time, timezone);
+          
+          // Отправляем уведомление об успехе
+          await ctx.reply(MESSAGES.TIME.UPDATED);
+          // Возвращаемся в настройки
+          await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_SETTINGS' });
+          await handleChallengeSettingsScene(ctx);
+          return;
+        } else {
+          // Не удалось распарсить, просим повторить
+          await ctx.reply(MESSAGES.TIME.PARSE_ERROR_EDIT);
+          return;
+        }
+      }
+
       // Проверяем, что пользователь не в другой специальной сцене
-      const specialScenes = ['timezone', 'reminder_time', 'edit_timezone', 'edit_reminder_time', 'waiting_for_photo'];
+      const specialScenes = ['timezone', 'edit_timezone', 'edit_reminder_time', 'waiting_for_photo'];
       if (!specialScenes.includes(currentScene)) {
         // Проверяем, есть ли активный челлендж и пропущенные дни
         const challenge = await challengeService.getActiveChallenge(userId);
