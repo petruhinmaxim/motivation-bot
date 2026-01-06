@@ -112,6 +112,30 @@ export class ChallengeService {
   }
 
   /**
+   * Обновляет дату старта активного челленджа
+   */
+  async updateChallengeStartDate(userId: number, newStartDate: Date): Promise<void> {
+    try {
+      const challenge = await this.getActiveChallenge(userId);
+      if (!challenge) {
+        throw new Error(`Active challenge not found for user ${userId}`);
+      }
+
+      await db
+        .update(challenges)
+        .set({
+          startDate: newStartDate,
+          updatedAt: new Date(),
+        })
+        .where(eq(challenges.id, challenge.id));
+      logger.info(`Updated challenge start date for user ${userId} to ${newStartDate.toISOString()}`);
+    } catch (error) {
+      logger.error(`Error updating challenge start date for user ${userId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Обновляет время напоминаний и статус напоминаний для активного челленджа
    */
   async updateReminderTime(userId: number, reminderTime: string): Promise<void> {

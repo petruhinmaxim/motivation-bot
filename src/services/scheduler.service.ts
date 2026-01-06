@@ -6,6 +6,9 @@ import {
   getScheduledTaskDataKey, 
   getScheduledTasksKey,
 } from '../redis/keys.js';
+import { InlineKeyboard } from 'grammy';
+import { BUTTONS, MESSAGES } from '../scenes/messages.js';
+import { challengeService } from './challenge.service.js';
 
 interface ScheduledTask {
   userId: number;
@@ -299,7 +302,27 @@ class SchedulerService {
       }
 
       try {
-        // Notification mechanics removed - scene kept for future implementation
+        // Проверяем, не начал ли пользователь уже челлендж
+        const challenge = await challengeService.getActiveChallenge(userId);
+        if (challenge) {
+          // Пользователь уже начал челлендж, отменяем уведомление
+          logger.info(`User ${userId} already has active challenge, cancelling notification`);
+          this.cancelTask(userId);
+          return;
+        }
+
+        // Отправляем уведомление с кнопками
+        const keyboard = new InlineKeyboard()
+          .text(BUTTONS.TODAY, 'start_today_from_notification')
+          .text(BUTTONS.TOMORROW, 'start_tomorrow_from_notification')
+          .row()
+          .text(BUTTONS.MONDAY, 'start_monday_from_notification');
+
+        await this.botApi.sendMessage(userId, MESSAGES.CHALLENGE_START_NOTIFICATION.TEXT, {
+          reply_markup: keyboard,
+          disable_notification: true,
+        });
+        logger.info(`Scheduled challenge start reminder sent to user ${userId}`);
       } catch (error: any) {
         const shouldCancel = handleTelegramError(error, userId);
         if (shouldCancel || error?.message === 'USER_BLOCKED_BOT') {
@@ -327,7 +350,27 @@ class SchedulerService {
       }
 
       try {
-        // Notification mechanics removed - scene kept for future implementation
+        // Проверяем, не начал ли пользователь уже челлендж
+        const challenge = await challengeService.getActiveChallenge(userId);
+        if (challenge) {
+          // Пользователь уже начал челлендж, отменяем уведомление
+          logger.info(`User ${userId} already has active challenge, cancelling notification`);
+          this.cancelTask(userId);
+          return;
+        }
+
+        // Отправляем уведомление с кнопками
+        const keyboard = new InlineKeyboard()
+          .text(BUTTONS.TODAY, 'start_today_from_notification')
+          .text(BUTTONS.TOMORROW, 'start_tomorrow_from_notification')
+          .row()
+          .text(BUTTONS.MONDAY, 'start_monday_from_notification');
+
+        await this.botApi.sendMessage(userId, MESSAGES.CHALLENGE_START_NOTIFICATION.TEXT, {
+          reply_markup: keyboard,
+          disable_notification: true,
+        });
+        logger.info(`Scheduled challenge start reminder sent to user ${userId}`);
       } catch (error: any) {
         const shouldCancel = handleTelegramError(error, userId);
         if (shouldCancel || error?.message === 'USER_BLOCKED_BOT') {
