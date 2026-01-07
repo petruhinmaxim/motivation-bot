@@ -4,7 +4,7 @@ import { challenges } from '../database/schema.js';
 import logger from '../utils/logger.js';
 import redis from '../redis/client.js';
 import { getPhotoUploadKey } from '../redis/keys.js';
-import { getYesterdayDateString, formatDateToString } from '../utils/date-utils.js';
+import { getYesterdayDateString, formatDateToString, getCurrentDateString } from '../utils/date-utils.js';
 import { userService } from './user.service.js';
 import { notificationService } from './notification.service.js';
 
@@ -367,6 +367,21 @@ export class ChallengeService {
       if (yesterdayDate < startDateString) {
         logger.debug(`Yesterday (${yesterdayDate}) is before challenge start date (${startDateString}), skipping increment for user ${userId}`);
         return false;
+      }
+
+      // Дополнительная проверка: если челлендж создан сегодня (после 20:00), 
+      // то первая проверка должна быть на следующий день (пропускаем эту проверку)
+      const currentDate = getCurrentDateString(timezoneOffset);
+      if (startDateString === currentDate) {
+        // Челлиндж создан сегодня, проверяем время создания
+        const challengeStartLocalTime = new Date(challenge.startDate.getTime() + (timezoneOffset * 60 * 60 * 1000));
+        const challengeStartHour = challengeStartLocalTime.getHours();
+        
+        // Если челлендж создан после 20:00, пропускаем проверку (слишком рано для первой проверки)
+        if (challengeStartHour >= 20) {
+          logger.debug(`Challenge created today after 20:00 (${challengeStartHour}:00), skipping check for user ${userId}`);
+          return false;
+        }
       }
 
       // Проверяем, было ли загружено фото вчера

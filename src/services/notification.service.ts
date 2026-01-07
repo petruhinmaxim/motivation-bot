@@ -16,6 +16,7 @@ import { challengeService } from './challenge.service.js';
 import { userService } from './user.service.js';
 import { getRandomReminderPhrase } from '../utils/motivational-phrases.js';
 import { getMissedDayImagePath } from '../utils/missed-days-images.js';
+import { getYesterdayDateString } from '../utils/date-utils.js';
 import { handleChallengeStatsScene } from '../scenes/challenge-stats.scene.js';
 import { handleStartScene } from '../scenes/start.scene.js';
 import { handleBeginScene } from '../scenes/begin.scene.js';
@@ -524,6 +525,19 @@ class NotificationService {
       } else if (updatedChallenge.daysWithoutWorkout > 0) {
         // Есть пропущенные дни, но челлендж еще активен
         await this.sendMissedDayNotification(userId, updatedChallenge.daysWithoutWorkout);
+      } else {
+        // Проверяем, было ли фото отправлено вчера, даже если счетчик еще не увеличился
+        // (это может произойти, если челлендж создан поздно вечером)
+        const yesterdayDate = getYesterdayDateString(timezone);
+        const hadPhotoYesterday = await challengeService.hasPhotoUploadedToday(userId, yesterdayDate);
+        
+        if (!hadPhotoYesterday) {
+          // Фото не было отправлено вчера, но счетчик еще не увеличился
+          // Это может произойти, если челлендж создан поздно вечером и проверка происходит на следующий день
+          // Отправляем уведомление о пропущенном дне
+          logger.info(`Photo not uploaded yesterday for user ${userId}, but daysWithoutWorkout is 0, sending notification anyway`);
+          await this.sendMissedDayNotification(userId, 1);
+        }
       }
     } catch (error) {
       const shouldCancel = handleTelegramError(error, userId);
