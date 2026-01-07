@@ -3,9 +3,7 @@ import { InputFile, InlineKeyboard } from 'grammy';
 import logger from '../utils/logger.js';
 import redis from '../redis/client.js';
 import { 
-  getDailyReminderKey,
   getDailyReminderDataKey,
-  getMissedCheckKey,
   getMissedCheckDataKey,
   getNotificationLockKey,
   getMissedNotificationSentKey,
@@ -18,10 +16,8 @@ import { getRandomReminderPhrase } from '../utils/motivational-phrases.js';
 import { getMissedDayImagePath } from '../utils/missed-days-images.js';
 import { getYesterdayDateString } from '../utils/date-utils.js';
 import { handleChallengeStatsScene } from '../scenes/challenge-stats.scene.js';
-import { handleStartScene } from '../scenes/start.scene.js';
-import { handleBeginScene } from '../scenes/begin.scene.js';
 import { handleTelegramError } from '../utils/telegram-error-handler.js';
-import { BUTTONS, MESSAGES } from '../scenes/messages.js';
+import { BUTTONS } from '../scenes/messages.js';
 
 interface DailyReminderData {
   userId: number;
