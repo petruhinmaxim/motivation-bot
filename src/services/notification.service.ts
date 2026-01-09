@@ -334,6 +334,13 @@ class NotificationService {
         return;
       }
 
+      // НЕ отправляем напоминание, если есть пропущенные дни
+      // В этом случае должно отправляться только уведомление о пропущенном дне
+      if (challenge.daysWithoutWorkout > 0) {
+        logger.info(`Skipping reminder for user ${userId}: has ${challenge.daysWithoutWorkout} missed days`);
+        return;
+      }
+
       // Отправляем случайную фразу
       const reminderPhrase = getRandomReminderPhrase();
       await this.botApi.sendMessage(userId, reminderPhrase);
