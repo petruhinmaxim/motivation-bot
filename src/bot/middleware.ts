@@ -829,6 +829,9 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           const timezone = user?.timezone ?? 3;
           await notificationService.scheduleDailyReminder(userId, validation.time, timezone);
           
+          // Перепланируем проверку пропущенных дней на новое время
+          await notificationService.rescheduleMissedDaysCheck(userId, timezone);
+          
           // Отменяем таймер бездействия при выходе из процесса регистрации
           idleTimerService.cancelIdleTimer(userId);
           // Переходим к сцене правил челленджа
@@ -860,6 +863,9 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           const user = await userService.getUser(userId);
           const timezone = user?.timezone ?? 3;
           await notificationService.scheduleDailyReminder(userId, validation.time, timezone);
+          
+          // Перепланируем проверку пропущенных дней на новое время
+          await notificationService.rescheduleMissedDaysCheck(userId, timezone);
           
           // Отправляем уведомление об успехе
           await ctx.reply(MESSAGES.TIME.UPDATED);

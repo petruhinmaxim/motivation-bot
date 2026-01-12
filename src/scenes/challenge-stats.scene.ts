@@ -53,6 +53,8 @@ export async function handleChallengeStatsScene(ctx: Context) {
       // Если время не было установлено, сохраняем его
       if (!challenge.reminderTime) {
         await challengeService.updateReminderTime(userId, reminderTime);
+        // Перепланируем проверку пропущенных дней на новое время
+        await notificationService.rescheduleMissedDaysCheck(userId, userTimezone);
       }
       
       await notificationService.scheduleDailyReminder(userId, reminderTime, userTimezone);
