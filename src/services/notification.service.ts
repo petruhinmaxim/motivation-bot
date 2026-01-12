@@ -457,11 +457,11 @@ class NotificationService {
       // Время уже прошло, планируем на завтра
       const tomorrowTime = this.getNextMissedCheckTime(reminderTime, timezone, challengeStartDate, false);
       const tomorrowDelay = tomorrowTime.getTime() - now.getTime();
-      await this.scheduleMissedCheckInternal(userId, timezone, reminderTime, tomorrowTime, tomorrowDelay, challenge.id, challengeStartDate);
+      await this.scheduleMissedCheckInternal(userId, timezone, tomorrowTime, tomorrowDelay, challenge.id, challengeStartDate);
       return;
     }
 
-    await this.scheduleMissedCheckInternal(userId, timezone, reminderTime, scheduledTime, delay, challenge.id, challengeStartDate);
+    await this.scheduleMissedCheckInternal(userId, timezone, scheduledTime, delay, challenge.id, challengeStartDate);
   }
 
   /**
@@ -470,7 +470,6 @@ class NotificationService {
   private async scheduleMissedCheckInternal(
     userId: number,
     timezone: number,
-    reminderTime: string | null,
     scheduledTime: Date,
     delay: number,
     challengeId: number,
@@ -496,12 +495,12 @@ class NotificationService {
           const now = new Date();
           const delay = scheduledTime.getTime() - now.getTime();
           if (delay > 0) {
-            await this.scheduleMissedCheckInternal(userId, currentTimezone, currentReminderTime, scheduledTime, delay, challenge.id, new Date(challenge.startDate));
+            await this.scheduleMissedCheckInternal(userId, currentTimezone, scheduledTime, delay, challenge.id, new Date(challenge.startDate));
           } else {
             // Если время уже прошло, планируем на завтра
             const tomorrowTime = this.getNextMissedCheckTime(currentReminderTime, currentTimezone, new Date(challenge.startDate), false);
             const tomorrowDelay = tomorrowTime.getTime() - now.getTime();
-            await this.scheduleMissedCheckInternal(userId, currentTimezone, currentReminderTime, tomorrowTime, tomorrowDelay, challenge.id, new Date(challenge.startDate));
+            await this.scheduleMissedCheckInternal(userId, currentTimezone, tomorrowTime, tomorrowDelay, challenge.id, new Date(challenge.startDate));
           }
         }
       } catch (error: any) {
@@ -740,9 +739,9 @@ class NotificationService {
       // Время уже прошло, планируем на завтра
       const tomorrowTime = this.getNextMissedCheckTime(reminderTime, timezone, new Date(challenge.startDate), false);
       const tomorrowDelay = tomorrowTime.getTime() - now.getTime();
-      await this.scheduleMissedCheckInternal(userId, timezone, reminderTime, tomorrowTime, tomorrowDelay, challenge.id, new Date(challenge.startDate));
+      await this.scheduleMissedCheckInternal(userId, timezone, tomorrowTime, tomorrowDelay, challenge.id, new Date(challenge.startDate));
     } else {
-      await this.scheduleMissedCheckInternal(userId, timezone, reminderTime, scheduledTime, delay, challenge.id, new Date(challenge.startDate));
+      await this.scheduleMissedCheckInternal(userId, timezone, scheduledTime, delay, challenge.id, new Date(challenge.startDate));
     }
   }
 
@@ -801,40 +800,6 @@ class NotificationService {
     }
   }
 
-  /**
-   * Инициализирует уведомления для активных челленджей, которые еще не запланированы
-   */
-  private async initializeNotificationsForActiveChallenges(): Promise<void> {
-    try {
-      const activeChallenges = await challengeService.getAllActiveChallenges();
-      let initializedMissed = 0;
-
-      for (const challenge of activeChallenges) {
-        // Пропускаем, если проверка уже запланирована
-        if (this.missedChecks.has(challenge.userId)) {
-          continue;
-        }
-
-        // Проверяем в Redis
-        const dataJson = await redis.get(getMissedCheckDataKey(challenge.userId));
-        if (dataJson) {
-          continue;
-        }
-
-        // Планируем проверку пропущенных дней
-        const user = await userService.getUser(challenge.userId);
-        const timezone = user?.timezone ?? 3;
-        await this.scheduleMissedDaysCheck(challenge.userId, timezone, new Date(challenge.startDate));
-        initializedMissed++;
-      }
-
-      if (initializedMissed > 0) {
-        logger.info(`Initialized ${initializedMissed} missed checks for active challenges`);
-      }
-    } catch (error) {
-      logger.error('Error initializing notifications for active challenges:', error);
-    }
-  }
 }
 
 export const notificationService = new NotificationService();
