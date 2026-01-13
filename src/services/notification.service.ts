@@ -9,6 +9,7 @@ import {
   getMissedNotificationSentKey,
   getDailyRemindersListKey,
   getMissedChecksListKey,
+  getDailyHealthCheckLockKey,
 } from '../redis/keys.js';
 import { challengeService } from './challenge.service.js';
 import { userService } from './user.service.js';
@@ -51,6 +52,7 @@ class NotificationService {
   private dailyReminders = new Map<number, ScheduledReminder>();
   private missedChecks = new Map<number, ScheduledMissedCheck>();
   private botApi: Api | null = null;
+  private dailyHealthCheckTimeoutId: NodeJS.Timeout | null = null;
 
   /**
    * Устанавливает API бота
@@ -434,6 +436,13 @@ class NotificationService {
   }
 
   /**
+   * Проверяет, запланирована ли проверка пропущенных дней
+   */
+  hasMissedDaysCheck(userId: number): boolean {
+    return this.missedChecks.has(userId);
+  }
+
+  /**
    * Планирует проверку пропущенных дней
    */
   async scheduleMissedDaysCheck(userId: number, timezone: number, challengeStartDate: Date): Promise<void> {
@@ -795,9 +804,180 @@ class NotificationService {
       }
 
       logger.info(`Recreated ${createdMissedChecks} missed checks and ${createdDailyReminders} daily reminders for active challenges`);
+
+      // Планируем ежедневную проверку здоровья
+      this.scheduleDailyHealthCheck();
     } catch (error) {
       logger.error('Error recreating notifications:', error);
     }
+  }
+
+  /**
+   * Ежедневная проверка здоровья всех активных челленджей в 4:00 МСК
+   * Проверяет пропущенные дни и пересоздает уведомления при необходимости
+   */
+  async performDailyHealthCheck(): Promise<void> {
+    // Используем Redis lock для предотвращения параллельных запусков
+    const lockKey = getDailyHealthCheckLockKey();
+    const lockValue = Date.now().toString();
+    const lockTTL = 3600; // 1 час (на случай, если проверка застрянет)
+
+    try {
+      const lockAcquired = await redis.set(lockKey, lockValue, 'EX', lockTTL, 'NX');
+      if (!lockAcquired) {
+        logger.warn('Daily health check already in progress (lock exists), skipping');
+        return;
+      }
+
+      logger.info('Starting daily health check at 4:00 MSK...');
+
+      // Получаем все активные челленджи
+      const activeChallenges = await challengeService.getAllActiveChallenges();
+      let checkedCount = 0;
+      let recreatedMissedChecks = 0;
+      let recreatedReminders = 0;
+      let failedCount = 0;
+      let errorCount = 0;
+
+      for (const challenge of activeChallenges) {
+        try {
+          const user = await userService.getUser(challenge.userId);
+          if (!user) {
+            logger.warn(`User ${challenge.userId} not found, skipping health check`);
+            continue;
+          }
+
+          const timezone = user.timezone ?? 3;
+
+          // 1. Проверяем пропущенные дни (идемпотентная операция)
+          // Это безопасно, так как checkAndIncrementMissedDays использует транзакции
+          const wasFailed = await challengeService.checkAndIncrementMissedDays(
+            challenge.userId,
+            timezone
+          );
+
+          // Получаем обновленный челлендж после проверки
+          const updatedChallenge = await challengeService.getActiveChallenge(challenge.userId);
+          if (!updatedChallenge) {
+            continue;
+          }
+
+          if (wasFailed || updatedChallenge.status === 'failed') {
+            failedCount++;
+            // Челлендж провален, отменяем проверки
+            this.cancelMissedDaysCheck(challenge.userId);
+            this.cancelDailyReminder(challenge.userId);
+            // Отправляем финальное уведомление о провале
+            if (this.botApi) {
+              try {
+                await this.sendFinalMissedDayNotification(challenge.userId);
+              } catch (error) {
+                logger.error(`Error sending final notification to user ${challenge.userId}:`, error);
+              }
+            }
+            logger.info(`Challenge failed for user ${challenge.userId} during health check`);
+            continue;
+          }
+
+          // 2. Проверяем, запланирована ли проверка пропущенных дней
+          const hasMissedCheck = this.hasMissedDaysCheck(challenge.userId);
+          if (!hasMissedCheck) {
+            // Пересоздаем проверку
+            // Уведомление будет отправлено в установленное пользователем время (или 12:00 МСК по умолчанию)
+            await this.scheduleMissedDaysCheck(
+              challenge.userId,
+              timezone,
+              new Date(challenge.startDate)
+            );
+            recreatedMissedChecks++;
+            logger.info(`Recreated missed check for user ${challenge.userId}`);
+          }
+
+          // 3. Проверяем, запланировано ли ежедневное напоминание (если включено)
+          if (challenge.reminderStatus && challenge.reminderTime) {
+            const hasReminder = this.hasDailyReminder(challenge.userId);
+            if (!hasReminder) {
+              const reminderTime = challenge.reminderTime.slice(0, 5); // HH:MM
+              await this.scheduleDailyReminder(challenge.userId, reminderTime, timezone);
+              recreatedReminders++;
+              logger.info(`Recreated daily reminder for user ${challenge.userId}`);
+            }
+          }
+
+          checkedCount++;
+        } catch (error) {
+          errorCount++;
+          logger.error(`Error in health check for user ${challenge.userId}:`, error);
+          // Продолжаем обработку других челленджей
+        }
+      }
+
+      logger.info(
+        `Daily health check completed: checked ${checkedCount} challenges, ` +
+        `recreated ${recreatedMissedChecks} missed checks, ` +
+        `recreated ${recreatedReminders} reminders, ` +
+        `failed ${failedCount} challenges, ` +
+        `errors ${errorCount}`
+      );
+    } catch (error) {
+      logger.error('Error performing daily health check:', error);
+    } finally {
+      // Освобождаем блокировку
+      try {
+        await redis.del(lockKey);
+      } catch (error) {
+        logger.error('Error releasing health check lock:', error);
+      }
+    }
+  }
+
+  /**
+   * Отменяет ежедневную проверку здоровья
+   */
+  cancelDailyHealthCheck(): void {
+    if (this.dailyHealthCheckTimeoutId) {
+      clearTimeout(this.dailyHealthCheckTimeoutId);
+      this.dailyHealthCheckTimeoutId = null;
+      logger.info('Cancelled daily health check');
+    }
+  }
+
+  /**
+   * Планирует ежедневную проверку здоровья в 4:00 МСК
+   */
+  scheduleDailyHealthCheck(): void {
+    // Отменяем предыдущую проверку, если есть
+    if (this.dailyHealthCheckTimeoutId) {
+      clearTimeout(this.dailyHealthCheckTimeoutId);
+      this.dailyHealthCheckTimeoutId = null;
+    }
+
+    const now = new Date();
+    const mskOffset = 3 * 60 * 60 * 1000; // МСК = UTC+3
+    const mskTime = now.getTime() + mskOffset;
+    const mskDate = new Date(mskTime);
+
+    // Устанавливаем время на 4:00 МСК сегодня
+    const today4AM = new Date(mskDate);
+    today4AM.setUTCHours(4, 0, 0, 0);
+
+    // Если уже прошло 4:00, планируем на завтра
+    const msPerDay = 24 * 60 * 60 * 1000;
+    const targetTime = today4AM.getTime() <= mskTime
+      ? today4AM.getTime() + msPerDay
+      : today4AM.getTime();
+
+    const delay = targetTime - mskTime;
+    const targetDate = new Date(targetTime - mskOffset); // Конвертируем обратно в UTC
+
+    logger.info(`Scheduling daily health check at ${targetDate.toISOString()} (in ${Math.round(delay / 1000 / 60)} minutes)`);
+
+    this.dailyHealthCheckTimeoutId = setTimeout(async () => {
+      this.dailyHealthCheckTimeoutId = null;
+      await this.performDailyHealthCheck();
+      // Планируем следующую проверку на завтра
+      this.scheduleDailyHealthCheck();
+    }, delay);
   }
 
 }
