@@ -48,9 +48,16 @@ interface ScheduledMissedCheck {
   scheduledTime: Date;
 }
 
+interface ScheduledMissedDayNotification {
+  userId: number;
+  timeoutId: NodeJS.Timeout;
+  scheduledTime: Date;
+}
+
 class NotificationService {
   private dailyReminders = new Map<number, ScheduledReminder>();
   private missedChecks = new Map<number, ScheduledMissedCheck>();
+  private missedDayNotifications = new Map<number, ScheduledMissedDayNotification>();
   private botApi: Api | null = null;
   private dailyHealthCheckTimeoutId: NodeJS.Timeout | null = null;
 
@@ -96,60 +103,41 @@ class NotificationService {
   }
 
   /**
-   * Вычисляет время следующей проверки пропущенных дней в установленное пользователем время
+   * Вычисляет время следующего уведомления о пропущенном дне в установленное пользователем время
    * @param reminderTime - время напоминания (HH:MM) или null для использования 12:00 МСК
    * @param timezone - часовой пояс пользователя
-   * @param challengeStartDate - дата создания челленджа (для проверки, создан ли сегодня)
-   * @param isFirstSchedule - true при первом планировании (проверяем время создания), false при перепланировании
+   * @returns Дата следующего уведомления
    */
-  private getNextMissedCheckTime(reminderTime: string | null, timezone: number, challengeStartDate: Date, isFirstSchedule: boolean = true): Date {
+  private getNextNotificationTime(reminderTime: string | null, timezone: number): Date {
     const now = new Date();
     
     // Если время не установлено, используем 12:00 МСК (timezone = 3)
-    const checkTime = reminderTime || '12:00';
-    const checkTimezone = reminderTime ? timezone : 3; // Если время не установлено, используем МСК
+    const notificationTime = reminderTime || '12:00';
+    const notificationTimezone = reminderTime ? timezone : 3; // Если время не установлено, используем МСК
     
-    const [hours, minutes] = checkTime.split(':').map(Number);
+    const [hours, minutes] = notificationTime.split(':').map(Number);
     
     // Смещение часового пояса в миллисекундах
-    const timezoneOffsetMs = checkTimezone * 60 * 60 * 1000;
+    const timezoneOffsetMs = notificationTimezone * 60 * 60 * 1000;
     
     // Получаем текущее время в локальном часовом поясе
     const localNowMs = now.getTime() + timezoneOffsetMs;
     const msPerDay = 24 * 60 * 60 * 1000;
     const localDayStartMs = Math.floor(localNowMs / msPerDay) * msPerDay;
     
-    // Время проверки сегодня в локальном времени (в миллисекундах)
-    const todayCheckLocalMs = localDayStartMs + (hours * 60 * 60 * 1000) + (minutes * 60 * 1000);
+    // Время уведомления сегодня в локальном времени (в миллисекундах)
+    const todayNotificationLocalMs = localDayStartMs + (hours * 60 * 60 * 1000) + (minutes * 60 * 1000);
     
-    let nextCheckLocalMs: number;
-    
-    if (isFirstSchedule) {
-      // При первом планировании проверяем, создан ли челлендж сегодня
-      const challengeStartLocalMs = challengeStartDate.getTime() + timezoneOffsetMs;
-      const challengeStartDayStartMs = Math.floor(challengeStartLocalMs / msPerDay) * msPerDay;
-      const currentDayStartMs = localDayStartMs;
-      
-      // Если челлендж создан сегодня, планируем проверку на завтра
-      if (challengeStartDayStartMs === currentDayStartMs) {
-        nextCheckLocalMs = todayCheckLocalMs + msPerDay;
-      } else {
-        // Если время проверки уже прошло сегодня, планируем на завтра
-        nextCheckLocalMs = todayCheckLocalMs <= localNowMs 
-          ? todayCheckLocalMs + msPerDay 
-          : todayCheckLocalMs;
-      }
-    } else {
-      // При перепланировании просто планируем на следующее время проверки
-      nextCheckLocalMs = todayCheckLocalMs <= localNowMs 
-        ? todayCheckLocalMs + msPerDay 
-        : todayCheckLocalMs;
-    }
+    // Если время уведомления уже прошло сегодня, планируем на завтра
+    const nextNotificationLocalMs = todayNotificationLocalMs <= localNowMs 
+      ? todayNotificationLocalMs + msPerDay 
+      : todayNotificationLocalMs;
     
     // Конвертируем обратно в UTC
-    const nextCheckUtcMs = nextCheckLocalMs - timezoneOffsetMs;
-    return new Date(nextCheckUtcMs);
+    const nextNotificationUtcMs = nextNotificationLocalMs - timezoneOffsetMs;
+    return new Date(nextNotificationUtcMs);
   }
+
 
   /**
    * Сохраняет ежедневное уведомление в Redis
@@ -188,7 +176,10 @@ class NotificationService {
 
   /**
    * Сохраняет проверку пропущенных дней в Redis
+   * @deprecated Больше не используется, так как проверка выполняется только в 4:00 МСК
+   * @internal
    */
+  // @ts-expect-error - Deprecated method, kept for backward compatibility
   private async saveMissedCheckToRedis(
     userId: number,
     timezone: number,
@@ -437,158 +428,159 @@ class NotificationService {
 
   /**
    * Проверяет, запланирована ли проверка пропущенных дней
+   * @deprecated Используется только для обратной совместимости
    */
   hasMissedDaysCheck(userId: number): boolean {
     return this.missedChecks.has(userId);
   }
 
   /**
-   * Планирует проверку пропущенных дней
+   * Проверяет, запланировано ли уведомление о пропущенном дне
    */
-  async scheduleMissedDaysCheck(userId: number, timezone: number, challengeStartDate: Date): Promise<void> {
-    // Отменяем предыдущую проверку
-    this.cancelMissedDaysCheck(userId);
+  hasMissedDayNotification(userId: number): boolean {
+    return this.missedDayNotifications.has(userId);
+  }
+
+  /**
+   * Планирует уведомление о пропущенном дне на установленное пользователем время
+   * @param userId - ID пользователя
+   * @param timezone - часовой пояс пользователя
+   * @param daysWithoutWorkout - количество пропущенных дней
+   * @param isFailed - true, если челлендж провален (3 дня пропущено)
+   */
+  async scheduleMissedDayNotification(
+    userId: number,
+    timezone: number,
+    daysWithoutWorkout: number,
+    isFailed: boolean = false
+  ): Promise<void> {
+    // Отменяем предыдущее уведомление
+    this.cancelMissedDayNotification(userId);
 
     const challenge = await challengeService.getActiveChallenge(userId);
     if (!challenge) {
-      logger.warn(`Cannot schedule missed check: no active challenge for user ${userId}`);
+      logger.warn(`Cannot schedule missed day notification: no active challenge for user ${userId}`);
       return;
     }
 
     // Получаем время напоминания из челленджа (или null, если не установлено)
     const reminderTime = challenge.reminderTime ? challenge.reminderTime.slice(0, 5) : null; // HH:MM
 
-    const scheduledTime = this.getNextMissedCheckTime(reminderTime, timezone, challengeStartDate, true);
+    // Вычисляем время уведомления
+    const scheduledTime = this.getNextNotificationTime(reminderTime, timezone);
     const now = new Date();
     const delay = scheduledTime.getTime() - now.getTime();
 
     if (delay <= 0) {
       // Время уже прошло, планируем на завтра
-      const tomorrowTime = this.getNextMissedCheckTime(reminderTime, timezone, challengeStartDate, false);
+      const tomorrowTime = this.getNextNotificationTime(reminderTime, timezone);
       const tomorrowDelay = tomorrowTime.getTime() - now.getTime();
-      await this.scheduleMissedCheckInternal(userId, timezone, tomorrowTime, tomorrowDelay, challenge.id, challengeStartDate);
+      await this.scheduleMissedDayNotificationInternal(
+        userId,
+        timezone,
+        tomorrowTime,
+        tomorrowDelay,
+        challenge.id,
+        daysWithoutWorkout,
+        isFailed
+      );
       return;
     }
 
-    await this.scheduleMissedCheckInternal(userId, timezone, scheduledTime, delay, challenge.id, challengeStartDate);
+    await this.scheduleMissedDayNotificationInternal(
+      userId,
+      timezone,
+      scheduledTime,
+      delay,
+      challenge.id,
+      daysWithoutWorkout,
+      isFailed
+    );
   }
 
   /**
-   * Внутренний метод для планирования проверки пропущенных дней
+   * Внутренний метод для планирования уведомления о пропущенном дне
    */
-  private async scheduleMissedCheckInternal(
+  private async scheduleMissedDayNotificationInternal(
     userId: number,
-    timezone: number,
+    _timezone: number,
     scheduledTime: Date,
     delay: number,
-    challengeId: number,
-    challengeStartDate: Date
+    _challengeId: number,
+    daysWithoutWorkout: number,
+    isFailed: boolean
   ): Promise<void> {
     logger.info(
-      `Scheduling missed days check for user ${userId} at ${scheduledTime.toISOString()} (in ${Math.round(delay / 1000)}s)`
+      `Scheduling missed day notification for user ${userId} at ${scheduledTime.toISOString()} (in ${Math.round(delay / 1000)}s), days: ${daysWithoutWorkout}, failed: ${isFailed}`
     );
 
     const timeoutId = setTimeout(async () => {
       try {
-        await this.checkAndSendMissedDay(userId, timezone);
-        this.missedChecks.delete(userId);
-        // Планируем следующую проверку (перепланирование, не первое)
-        const challenge = await challengeService.getActiveChallenge(userId);
-        if (challenge) {
-          const user = await userService.getUser(userId);
-          const currentTimezone = user?.timezone ?? 3;
-          // Получаем актуальное время напоминания из челленджа
-          const currentReminderTime = challenge.reminderTime ? challenge.reminderTime.slice(0, 5) : null;
-          // При перепланировании используем isFirstSchedule = false
-          const scheduledTime = this.getNextMissedCheckTime(currentReminderTime, currentTimezone, new Date(challenge.startDate), false);
-          const now = new Date();
-          const delay = scheduledTime.getTime() - now.getTime();
-          if (delay > 0) {
-            await this.scheduleMissedCheckInternal(userId, currentTimezone, scheduledTime, delay, challenge.id, new Date(challenge.startDate));
-          } else {
-            // Если время уже прошло, планируем на завтра
-            const tomorrowTime = this.getNextMissedCheckTime(currentReminderTime, currentTimezone, new Date(challenge.startDate), false);
-            const tomorrowDelay = tomorrowTime.getTime() - now.getTime();
-            await this.scheduleMissedCheckInternal(userId, currentTimezone, tomorrowTime, tomorrowDelay, challenge.id, new Date(challenge.startDate));
-          }
+        if (isFailed) {
+          await this.sendFinalMissedDayNotification(userId);
+        } else {
+          await this.sendMissedDayNotification(userId, daysWithoutWorkout);
         }
+        this.missedDayNotifications.delete(userId);
       } catch (error: any) {
         const shouldCancel = handleTelegramError(error, userId);
         if (shouldCancel || error?.message === 'USER_BLOCKED_BOT') {
-          logger.info(`User ${userId} blocked the bot, cancelling missed check`);
-          this.cancelMissedDaysCheck(userId);
+          logger.info(`User ${userId} blocked the bot, cancelling missed day notification`);
+          this.cancelMissedDayNotification(userId);
           return;
         }
-        logger.error(`Error in missed check for user ${userId}:`, error);
-        this.missedChecks.delete(userId);
+        logger.error(`Error in missed day notification for user ${userId}:`, error);
+        this.missedDayNotifications.delete(userId);
       }
     }, delay);
 
-    this.missedChecks.set(userId, {
+    this.missedDayNotifications.set(userId, {
       userId,
       timeoutId,
       scheduledTime,
     });
-
-    await this.saveMissedCheckToRedis(userId, timezone, scheduledTime, challengeId, challengeStartDate);
   }
 
   /**
-   * Проверяет пропущенные дни и отправляет уведомление при необходимости
+   * Отменяет уведомление о пропущенном дне
    */
-  private async checkAndSendMissedDay(userId: number, timezone: number): Promise<void> {
-    if (!this.botApi) {
-      logger.error('Bot API is not initialized');
+  cancelMissedDayNotification(userId: number): void {
+    const notification = this.missedDayNotifications.get(userId);
+    if (notification) {
+      clearTimeout(notification.timeoutId);
+      this.missedDayNotifications.delete(userId);
+      logger.info(`Cancelled missed day notification for user ${userId}`);
+    }
+  }
+
+  /**
+   * Перепланирует уведомление о пропущенном дне (при изменении времени напоминания)
+   */
+  async rescheduleMissedDayNotification(userId: number, timezone: number): Promise<void> {
+    const challenge = await challengeService.getActiveChallenge(userId);
+    if (!challenge) {
       return;
     }
 
-    try {
-      const challenge = await challengeService.getActiveChallenge(userId);
-      if (!challenge || challenge.status !== 'active') {
-        logger.info(`Skipping missed check for user ${userId}: challenge inactive`);
-        this.cancelMissedDaysCheck(userId);
-        return;
-      }
+    // Отменяем текущее уведомление
+    this.cancelMissedDayNotification(userId);
 
-      // Проверяем и увеличиваем счетчик пропущенных дней
-      const wasFailed = await challengeService.checkAndIncrementMissedDays(userId, timezone);
-      
-      // Получаем обновленный челлендж
-      const updatedChallenge = await challengeService.getActiveChallenge(userId);
-      if (!updatedChallenge) {
-        return;
-      }
-
-      if (wasFailed || updatedChallenge.status === 'failed') {
-        // Челлиндж провален (3 дня пропущено)
-        await this.sendFinalMissedDayNotification(userId);
-        this.cancelMissedDaysCheck(userId);
-      } else if (updatedChallenge.daysWithoutWorkout > 0) {
-        // Есть пропущенные дни, но челлендж еще активен
-        await this.sendMissedDayNotification(userId, updatedChallenge.daysWithoutWorkout);
-      } else {
-        // Проверяем, было ли фото отправлено вчера, даже если счетчик еще не увеличился
-        // (это может произойти, если челлендж создан поздно вечером)
-        const yesterdayDate = getYesterdayDateString(timezone);
-        const hadPhotoYesterday = await challengeService.hasPhotoUploadedToday(userId, yesterdayDate);
-        
-        if (!hadPhotoYesterday) {
-          // Фото не было отправлено вчера, но счетчик еще не увеличился
-          // Это может произойти, если челлендж создан поздно вечером и проверка происходит на следующий день
-          // Отправляем уведомление о пропущенном дне
-          logger.info(`Photo not uploaded yesterday for user ${userId}, but daysWithoutWorkout is 0, sending notification anyway`);
-          await this.sendMissedDayNotification(userId, 1);
-        }
-      }
-    } catch (error) {
-      const shouldCancel = handleTelegramError(error, userId);
-      if (shouldCancel) {
-        this.cancelMissedDaysCheck(userId);
-        return;
-      }
-      logger.error(`Error checking missed days for user ${userId}:`, error);
-      throw error;
+    // Если есть пропущенные дни, перепланируем уведомление
+    if (challenge.daysWithoutWorkout > 0) {
+      const isFailed = challenge.status === 'failed';
+      await this.scheduleMissedDayNotification(userId, timezone, challenge.daysWithoutWorkout, isFailed);
     }
+  }
+
+  /**
+   * Планирует проверку пропущенных дней
+   * @deprecated Проверка теперь выполняется только в 4:00 МСК через performDailyHealthCheck
+   * Метод оставлен для обратной совместимости, но больше не выполняет проверку
+   */
+  async scheduleMissedDaysCheck(_userId: number, _timezone: number, _challengeStartDate: Date): Promise<void> {
+    // Проверка пропущенных дней теперь выполняется только в 4:00 МСК
+    // Этот метод оставлен для обратной совместимости
+    logger.debug(`scheduleMissedDaysCheck called, but checks are now done only at 4:00 MSK`);
   }
 
   /**
@@ -725,33 +717,11 @@ class NotificationService {
   }
 
   /**
-   * Перепланирует проверку пропущенных дней (при изменении часового пояса или времени напоминаний)
+   * Перепланирует уведомление о пропущенном дне (при изменении времени напоминания)
    */
   async rescheduleMissedDaysCheck(userId: number, timezone: number): Promise<void> {
-    const challenge = await challengeService.getActiveChallenge(userId);
-    if (!challenge) {
-      return;
-    }
-
-    // Отменяем текущую проверку
-    this.cancelMissedDaysCheck(userId);
-
-    // Получаем время напоминания из челленджа (или null, если не установлено)
-    const reminderTime = challenge.reminderTime ? challenge.reminderTime.slice(0, 5) : null; // HH:MM
-
-    // Планируем новую проверку (перепланирование, не первое)
-    const scheduledTime = this.getNextMissedCheckTime(reminderTime, timezone, new Date(challenge.startDate), false);
-    const now = new Date();
-    const delay = scheduledTime.getTime() - now.getTime();
-
-    if (delay <= 0) {
-      // Время уже прошло, планируем на завтра
-      const tomorrowTime = this.getNextMissedCheckTime(reminderTime, timezone, new Date(challenge.startDate), false);
-      const tomorrowDelay = tomorrowTime.getTime() - now.getTime();
-      await this.scheduleMissedCheckInternal(userId, timezone, tomorrowTime, tomorrowDelay, challenge.id, new Date(challenge.startDate));
-    } else {
-      await this.scheduleMissedCheckInternal(userId, timezone, scheduledTime, delay, challenge.id, new Date(challenge.startDate));
-    }
+    // Перепланируем уведомление, если есть пропущенные дни
+    await this.rescheduleMissedDayNotification(userId, timezone);
   }
 
   /**
@@ -778,19 +748,14 @@ class NotificationService {
 
       // Получаем все активные челленджи
       const activeChallenges = await challengeService.getAllActiveChallenges();
-      let createdMissedChecks = 0;
       let createdDailyReminders = 0;
 
-      // Для каждого активного челленджа заново создаем проверки и напоминания
+      // Для каждого активного челленджа заново создаем напоминания
+      // Проверка пропущенных дней выполняется только в 4:00 МСК через performDailyHealthCheck
       for (const challenge of activeChallenges) {
         try {
           const user = await userService.getUser(challenge.userId);
           const timezone = user?.timezone ?? 3;
-
-          // Создаем проверку пропущенных дней для всех активных челленджей
-          // Проверка будет использовать время напоминаний из челленджа (или 12:00 МСК по умолчанию)
-          await this.scheduleMissedDaysCheck(challenge.userId, timezone, new Date(challenge.startDate));
-          createdMissedChecks++;
 
           // Создаем ежедневное напоминание, если оно включено
           if (challenge.reminderStatus && challenge.reminderTime) {
@@ -803,7 +768,7 @@ class NotificationService {
         }
       }
 
-      logger.info(`Recreated ${createdMissedChecks} missed checks and ${createdDailyReminders} daily reminders for active challenges`);
+      logger.info(`Recreated ${createdDailyReminders} daily reminders for active challenges`);
 
       // Планируем ежедневную проверку здоровья
       this.scheduleDailyHealthCheck();
@@ -864,33 +829,37 @@ class NotificationService {
 
           if (wasFailed || updatedChallenge.status === 'failed') {
             failedCount++;
-            // Челлендж провален, отменяем проверки
+            // Челлендж провален, отменяем проверки и уведомления
             this.cancelMissedDaysCheck(challenge.userId);
+            this.cancelMissedDayNotification(challenge.userId);
             this.cancelDailyReminder(challenge.userId);
-            // Отправляем финальное уведомление о провале
-            if (this.botApi) {
-              try {
-                await this.sendFinalMissedDayNotification(challenge.userId);
-              } catch (error) {
-                logger.error(`Error sending final notification to user ${challenge.userId}:`, error);
-              }
-            }
-            logger.info(`Challenge failed for user ${challenge.userId} during health check`);
+            // Планируем финальное уведомление о провале на установленное пользователем время
+            await this.scheduleMissedDayNotification(challenge.userId, timezone, 3, true);
+            logger.info(`Challenge failed for user ${challenge.userId} during health check, notification scheduled`);
             continue;
           }
 
-          // 2. Проверяем, запланирована ли проверка пропущенных дней
-          const hasMissedCheck = this.hasMissedDaysCheck(challenge.userId);
-          if (!hasMissedCheck) {
-            // Пересоздаем проверку
-            // Уведомление будет отправлено в установленное пользователем время (или 12:00 МСК по умолчанию)
-            await this.scheduleMissedDaysCheck(
+          // 2. Проверяем, нужно ли планировать уведомление о пропущенном дне
+          // Проверяем, было ли фото загружено вчера
+          const yesterdayDate = getYesterdayDateString(timezone);
+          const hadPhotoYesterday = await challengeService.hasPhotoUploadedToday(challenge.userId, yesterdayDate);
+
+          if (!hadPhotoYesterday && updatedChallenge.daysWithoutWorkout > 0) {
+            // Фото не было загружено вчера и есть пропущенные дни - планируем уведомление
+            // Отменяем старое уведомление, если есть
+            this.cancelMissedDayNotification(challenge.userId);
+            await this.scheduleMissedDayNotification(
               challenge.userId,
               timezone,
-              new Date(challenge.startDate)
+              updatedChallenge.daysWithoutWorkout,
+              false
             );
             recreatedMissedChecks++;
-            logger.info(`Recreated missed check for user ${challenge.userId}`);
+            logger.info(`Scheduled missed day notification for user ${challenge.userId} (${updatedChallenge.daysWithoutWorkout} days)`);
+          } else if (hadPhotoYesterday) {
+            // Фото было загружено вчера - отменяем уведомление, если оно было запланировано
+            this.cancelMissedDayNotification(challenge.userId);
+            logger.debug(`Photo was uploaded yesterday for user ${challenge.userId}, no notification needed`);
           }
 
           // 3. Проверяем, запланировано ли ежедневное напоминание (если включено)
@@ -914,7 +883,7 @@ class NotificationService {
 
       logger.info(
         `Daily health check completed: checked ${checkedCount} challenges, ` +
-        `recreated ${recreatedMissedChecks} missed checks, ` +
+        `scheduled ${recreatedMissedChecks} missed day notifications, ` +
         `recreated ${recreatedReminders} reminders, ` +
         `failed ${failedCount} challenges, ` +
         `errors ${errorCount}`

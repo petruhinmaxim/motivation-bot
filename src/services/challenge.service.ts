@@ -6,7 +6,6 @@ import redis from '../redis/client.js';
 import { getPhotoUploadKey } from '../redis/keys.js';
 import { getYesterdayDateString, formatDateToString, getCurrentDateString } from '../utils/date-utils.js';
 import { userService } from './user.service.js';
-import { notificationService } from './notification.service.js';
 
 export class ChallengeService {
   /**
@@ -69,7 +68,8 @@ export class ChallengeService {
       await this.clearPhotoUploadKeys(userId);
 
       // Получаем или устанавливаем часовой пояс по умолчанию (МСК)
-      const timezone = await userService.getOrSetDefaultTimezone(userId);
+      // Часовой пояс нужен для корректной работы проверки пропущенных дней в 4:00 МСК
+      await userService.getOrSetDefaultTimezone(userId);
 
       // Создаем новую запись
       await db.insert(challenges).values({
@@ -84,8 +84,7 @@ export class ChallengeService {
       });
       logger.info(`Created new challenge for user ${userId} with duration ${duration} days`);
 
-      // Планируем проверку пропущенных дней
-      await notificationService.scheduleMissedDaysCheck(userId, timezone, startDate);
+      // Проверка пропущенных дней теперь выполняется только в 4:00 МСК через performDailyHealthCheck
     } catch (error) {
       logger.error(`Error creating challenge for user ${userId}:`, error);
       throw error;
