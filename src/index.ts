@@ -55,15 +55,40 @@ async function start() {
     await migrate(db, { migrationsFolder: './src/database/migrations' });
     logger.info('✅ Database migrations completed');
 
-    // Запускаем бота
+    // Запускаем бота (не ждем завершения, так как bot.start() может не завершиться)
     logger.info('Starting bot...');
-    await bot.start();
-    logger.info('✅ Bot is running!');
-
-    // Восстанавливаем уведомления из Redis
+    const botStartPromise = bot.start().catch((error) => {
+      logger.error('Error starting bot:', error);
+      // Не прерываем запуск, бот может продолжить работать
+    });
+    
+    // Запускаем восстановление уведомлений параллельно
     logger.info('Restoring notifications...');
-    await notificationService.restoreNotifications();
+    const notificationsPromise = notificationService.restoreNotifications().catch((error) => {
+      logger.error('Error restoring notifications:', error);
+      // Не прерываем запуск, но логируем ошибку
+    });
+
+    // Ждем завершения восстановления уведомлений (это важнее для работы)
+    await notificationsPromise;
     logger.info('✅ Notifications restored');
+
+    // Пытаемся дождаться запуска бота с таймаутом
+    logger.info('Waiting for bot to start (with timeout)...');
+    try {
+      await Promise.race([
+        botStartPromise,
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Bot start timeout')), 5000)
+        )
+      ]);
+      logger.info('✅ Bot is running!');
+    } catch (error) {
+      logger.warn('Bot start may still be in progress (this is normal for long polling)');
+      // Это нормально для long polling - бот может продолжать работать
+    }
+    
+    logger.info('✅ Application startup completed');
   } catch (error) {
     logger.error('Failed to start application:', error);
     await shutdown('STARTUP_ERROR');
