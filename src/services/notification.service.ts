@@ -20,7 +20,7 @@ import { getMissedDayImagePath } from '../utils/missed-days-images.js';
 import { getYesterdayDateString } from '../utils/date-utils.js';
 import { handleChallengeStatsScene } from '../scenes/challenge-stats.scene.js';
 import { handleTelegramError } from '../utils/telegram-error-handler.js';
-import { BUTTONS } from '../scenes/messages.js';
+import { BUTTONS, MESSAGES } from '../scenes/messages.js';
 
 interface DailyReminderData {
   userId: number;
@@ -756,8 +756,7 @@ class NotificationService {
           }
         }
 
-        const missedWorkoutText = 
-          'Вчера ты дал жиру отдохнуть. Поделишься своим отчётом? Отправь его в чат, я сохраню, и по завершению челленджа ты увидишь, где были сложности и как прогрессировал.';
+        const missedWorkoutText = MESSAGES.MISSED_WORKOUT.TEXT;
 
         // Отправляем фото
         try {
