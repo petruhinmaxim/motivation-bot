@@ -21,6 +21,7 @@ export const botMachine = setup({
       | { type: 'GO_TO_MISSED_WORKOUT_REPORT' }
       | { type: 'GO_TO_CHALLENGE_FAILED' }
       | { type: 'GO_TO_FEEDBACK' }
+      | { type: 'GO_TO_START_NEW_CHALLENGE_CONFIRM' }
       | { type: 'GO_BACK' },
   },
 }).createMachine({
@@ -209,11 +210,27 @@ export const botMachine = setup({
         GO_TO_EDIT_REMINDER_TIME: {
           target: 'edit_reminder_time',
         },
+        GO_TO_START_NEW_CHALLENGE_CONFIRM: {
+          target: 'start_new_challenge_confirm',
+        },
         GO_BACK: {
           target: 'challenge_stats',
         },
         GO_TO_START: {
           target: 'start',
+        },
+      },
+    },
+    start_new_challenge_confirm: {
+      entry: ({ context }) => {
+        context.scene = 'start_new_challenge_confirm';
+      },
+      on: {
+        GO_TO_START: {
+          target: 'start',
+        },
+        GO_TO_CHALLENGE_SETTINGS: {
+          target: 'challenge_settings',
         },
       },
     },

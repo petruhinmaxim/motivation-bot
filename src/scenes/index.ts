@@ -13,4 +13,5 @@ export * from './edit-reminder-time.scene.js';
 export * from './missed-workout-report.scene.js';
 export * from './challenge-failed.scene.js';
 export * from './feedback.scene.js';
+export * from './start-new-challenge-confirm.scene.js';
 

@@ -21,6 +21,7 @@ import {
   handleEditTimezoneScene,
   handleEditReminderTimeScene,
   handleFeedbackScene,
+  handleStartNewChallengeConfirmScene,
 } from '../scenes/index.js';
 import { missedWorkoutReportService } from '../services/missed-workout-report.service.js';
 import { feedbackService } from '../services/feedback.service.js';
@@ -386,6 +387,39 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
 
       if (data === 'challenge_settings') {
         // Переходим к сцене настроек челленджа
+        await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_SETTINGS' });
+        await handleChallengeSettingsScene(ctx);
+        return;
+      }
+
+      if (data === 'start_new_challenge_confirm') {
+        // Переходим к сцене подтверждения начала нового челленджа
+        await stateService.sendEvent(userId, { type: 'GO_TO_START_NEW_CHALLENGE_CONFIRM' });
+        await handleStartNewChallengeConfirmScene(ctx);
+        return;
+      }
+
+      if (data === 'start_new_challenge_yes') {
+        try {
+          // Переводим активный челлендж в failed
+          await challengeService.failChallenge(userId);
+          
+          // Удаляем все уведомления для пользователя
+          notificationService.cancelDailyReminder(userId);
+          notificationService.cancelMissedDayNotification(userId);
+          
+          // Отправляем стартовую сцену
+          await stateService.sendEvent(userId, { type: 'GO_TO_START' });
+          await handleStartScene(ctx);
+        } catch (error: any) {
+          logger.error(`Error starting new challenge for user ${userId}:`, error);
+          await ctx.answerCallbackQuery('Произошла ошибка. Попробуйте позже.');
+        }
+        return;
+      }
+
+      if (data === 'start_new_challenge_no') {
+        // Возвращаем пользователя к настройкам
         await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_SETTINGS' });
         await handleChallengeSettingsScene(ctx);
         return;

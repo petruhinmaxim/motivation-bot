@@ -26,7 +26,9 @@ export async function handleChallengeSettingsScene(ctx: Context) {
     keyboard.text(BUTTONS.ENABLE_REMINDERS, 'enable_reminders');
   }
 
-  keyboard.row().text(BUTTONS.TO_CHALLENGE, 'challenge_stats');
+  keyboard.row().text(BUTTONS.START_NEW_CHALLENGE, 'start_new_challenge_confirm')
+    .row()
+    .text(BUTTONS.BACK, 'challenge_stats');
 
   // Если это callback query (нажатие на кнопку), редактируем сообщение
   if (ctx.callbackQuery) {
