@@ -10,6 +10,8 @@ import {
   getDailyRemindersListKey,
   getMissedChecksListKey,
   getDailyHealthCheckLockKey,
+  getMissedDayNotificationDataKey,
+  getMissedDayNotificationsListKey,
 } from '../redis/keys.js';
 import { challengeService } from './challenge.service.js';
 import { userService } from './user.service.js';
@@ -34,6 +36,15 @@ interface MissedCheckData {
   timezone: number;
   challengeId: number;
   challengeStartDate: string; // ISO string
+}
+
+interface MissedDayNotificationData {
+  userId: number;
+  scheduledTime: string; // ISO string
+  timezone: number;
+  challengeId: number;
+  daysWithoutWorkout: number;
+  isFailed: boolean;
 }
 
 interface ScheduledReminder {
@@ -66,6 +77,54 @@ class NotificationService {
    */
   setBotApi(api: Api): void {
     this.botApi = api;
+  }
+
+  /**
+   * Конвертирует UTC время в локальное время пользователя
+   */
+  private getLocalTime(utcTime: Date, timezone: number): Date {
+    const timezoneOffsetMs = timezone * 60 * 60 * 1000;
+    return new Date(utcTime.getTime() + timezoneOffsetMs);
+  }
+
+  /**
+   * Форматирует время до уведомления в читаемом виде
+   */
+  private formatTimeUntil(delayMs: number): string {
+    const seconds = Math.floor(delayMs / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (days > 0) {
+      const remainingHours = hours % 24;
+      if (remainingHours > 0) {
+        return `${days} дн. ${remainingHours} ч.`;
+      }
+      return `${days} дн.`;
+    } else if (hours > 0) {
+      const remainingMinutes = minutes % 60;
+      if (remainingMinutes > 0) {
+        return `${hours} ч. ${remainingMinutes} мин.`;
+      }
+      return `${hours} ч.`;
+    } else if (minutes > 0) {
+      return `${minutes} мин.`;
+    } else {
+      return `${seconds} сек.`;
+    }
+  }
+
+  /**
+   * Форматирует дату и время в локальном часовом поясе
+   */
+  private formatLocalDateTime(localTime: Date): string {
+    const year = localTime.getUTCFullYear();
+    const month = String(localTime.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(localTime.getUTCDate()).padStart(2, '0');
+    const hours = String(localTime.getUTCHours()).padStart(2, '0');
+    const minutes = String(localTime.getUTCMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}`;
   }
 
   /**
@@ -239,6 +298,56 @@ class NotificationService {
   }
 
   /**
+   * Сохраняет уведомление о пропущенном дне в Redis
+   */
+  private async saveMissedDayNotificationToRedis(
+    userId: number,
+    scheduledTime: Date,
+    timezone: number,
+    challengeId: number,
+    daysWithoutWorkout: number,
+    isFailed: boolean
+  ): Promise<void> {
+    try {
+      const data: MissedDayNotificationData = {
+        userId,
+        scheduledTime: scheduledTime.toISOString(),
+        timezone,
+        challengeId,
+        daysWithoutWorkout,
+        isFailed,
+      };
+
+      const ttlSeconds = Math.ceil((scheduledTime.getTime() - Date.now()) / 1000) + 86400; // TTL = время до выполнения + 1 день
+      await redis.set(
+        getMissedDayNotificationDataKey(userId),
+        JSON.stringify(data),
+        'EX',
+        ttlSeconds > 0 ? ttlSeconds : 86400
+      );
+
+      // Добавляем в список
+      const listKey = getMissedDayNotificationsListKey();
+      await redis.sadd(listKey, userId.toString());
+    } catch (error) {
+      logger.error(`Error saving missed day notification to Redis for user ${userId}:`, error);
+    }
+  }
+
+  /**
+   * Удаляет уведомление о пропущенном дне из Redis
+   */
+  private async removeMissedDayNotificationFromRedis(userId: number): Promise<void> {
+    try {
+      await redis.del(getMissedDayNotificationDataKey(userId));
+      const listKey = getMissedDayNotificationsListKey();
+      await redis.srem(listKey, userId.toString());
+    } catch (error) {
+      logger.error(`Error removing missed day notification from Redis for user ${userId}:`, error);
+    }
+  }
+
+  /**
    * Планирует ежедневное уведомление
    */
   async scheduleDailyReminder(userId: number, reminderTime: string, timezone: number): Promise<void> {
@@ -277,8 +386,16 @@ class NotificationService {
     delay: number,
     challengeId: number
   ): Promise<void> {
+    const localTime = this.getLocalTime(scheduledTime, timezone);
+    const localTimeStr = this.formatLocalDateTime(localTime);
+    const timeUntilStr = this.formatTimeUntil(delay);
+    const timezoneStr = timezone >= 0 ? `+${timezone}` : `${timezone}`;
+    
     logger.info(
-      `Scheduling daily reminder for user ${userId} at ${scheduledTime.toISOString()} (in ${Math.round(delay / 1000)}s)`
+      `Scheduling daily reminder for user ${userId}: ` +
+      `local time ${localTimeStr} (UTC${timezoneStr}), ` +
+      `UTC ${scheduledTime.toISOString()}, ` +
+      `in ${timeUntilStr} (${Math.round(delay / 1000)}s)`
     );
 
     const timeoutId = setTimeout(async () => {
@@ -503,15 +620,25 @@ class NotificationService {
    */
   private async scheduleMissedDayNotificationInternal(
     userId: number,
-    _timezone: number,
+    timezone: number,
     scheduledTime: Date,
     delay: number,
-    _challengeId: number,
+    challengeId: number,
     daysWithoutWorkout: number,
     isFailed: boolean
   ): Promise<void> {
+    const localTime = this.getLocalTime(scheduledTime, timezone);
+    const localTimeStr = this.formatLocalDateTime(localTime);
+    const timeUntilStr = this.formatTimeUntil(delay);
+    const timezoneStr = timezone >= 0 ? `+${timezone}` : `${timezone}`;
+    const statusStr = isFailed ? 'FAILED' : 'active';
+    
     logger.info(
-      `Scheduling missed day notification for user ${userId} at ${scheduledTime.toISOString()} (in ${Math.round(delay / 1000)}s), days: ${daysWithoutWorkout}, failed: ${isFailed}`
+      `Scheduling missed day notification for user ${userId}: ` +
+      `local time ${localTimeStr} (UTC${timezoneStr}), ` +
+      `UTC ${scheduledTime.toISOString()}, ` +
+      `in ${timeUntilStr} (${Math.round(delay / 1000)}s), ` +
+      `days: ${daysWithoutWorkout}, status: ${statusStr}`
     );
 
     const timeoutId = setTimeout(async () => {
@@ -522,6 +649,7 @@ class NotificationService {
           await this.sendMissedDayNotification(userId, daysWithoutWorkout);
         }
         this.missedDayNotifications.delete(userId);
+        await this.removeMissedDayNotificationFromRedis(userId);
       } catch (error: any) {
         const shouldCancel = handleTelegramError(error, userId);
         if (shouldCancel || error?.message === 'USER_BLOCKED_BOT') {
@@ -531,6 +659,7 @@ class NotificationService {
         }
         logger.error(`Error in missed day notification for user ${userId}:`, error);
         this.missedDayNotifications.delete(userId);
+        await this.removeMissedDayNotificationFromRedis(userId);
       }
     }, delay);
 
@@ -539,6 +668,8 @@ class NotificationService {
       timeoutId,
       scheduledTime,
     });
+
+    await this.saveMissedDayNotificationToRedis(userId, scheduledTime, timezone, challengeId, daysWithoutWorkout, isFailed);
   }
 
   /**
@@ -549,6 +680,7 @@ class NotificationService {
     if (notification) {
       clearTimeout(notification.timeoutId);
       this.missedDayNotifications.delete(userId);
+      this.removeMissedDayNotificationFromRedis(userId);
       logger.info(`Cancelled missed day notification for user ${userId}`);
     }
   }
@@ -726,52 +858,155 @@ class NotificationService {
 
   /**
    * Восстанавливает все уведомления при старте бота
-   * Заново создает все проверки и напоминания для активных челленджей
+   * Удаляет все существующие уведомления и пересоздает их заново на основе текущего состояния челленджей
    */
   async restoreNotifications(): Promise<void> {
     try {
-      logger.info('Recreating notifications for all active challenges...');
+      logger.info('=== Starting notification restoration ===');
 
-      // Отменяем все существующие проверки и напоминания
-      // Это гарантирует, что не будет дубликатов
+      // Шаг 1: Удаляем все уведомления из памяти
+      let cancelledMissedChecks = 0;
+      let cancelledDailyReminders = 0;
+      let cancelledMissedDayNotifications = 0;
+
       for (const [userId, check] of this.missedChecks.entries()) {
         clearTimeout(check.timeoutId);
         this.missedChecks.delete(userId);
-        await this.removeMissedCheckFromRedis(userId);
+        cancelledMissedChecks++;
       }
 
       for (const [userId, reminder] of this.dailyReminders.entries()) {
         clearTimeout(reminder.timeoutId);
         this.dailyReminders.delete(userId);
-        await this.removeDailyReminderFromRedis(userId);
+        cancelledDailyReminders++;
       }
 
-      // Получаем все активные челленджи
+      for (const [userId, notification] of this.missedDayNotifications.entries()) {
+        clearTimeout(notification.timeoutId);
+        this.missedDayNotifications.delete(userId);
+        cancelledMissedDayNotifications++;
+      }
+
+      logger.info(
+        `Cancelled from memory: ${cancelledMissedChecks} missed checks, ` +
+        `${cancelledDailyReminders} daily reminders, ${cancelledMissedDayNotifications} missed day notifications`
+      );
+
+      // Шаг 2: Очищаем все уведомления из Redis
+      let removedFromRedis = 0;
+
+      // Удаляем ежедневные напоминания
+      const dailyRemindersListKey = getDailyRemindersListKey();
+      const dailyReminderUserIds = await redis.smembers(dailyRemindersListKey);
+      for (const userIdStr of dailyReminderUserIds) {
+        const userId = parseInt(userIdStr, 10);
+        if (!isNaN(userId)) {
+          await this.removeDailyReminderFromRedis(userId);
+          removedFromRedis++;
+        }
+      }
+
+      // Удаляем проверки пропущенных дней
+      const missedChecksListKey = getMissedChecksListKey();
+      const missedCheckUserIds = await redis.smembers(missedChecksListKey);
+      for (const userIdStr of missedCheckUserIds) {
+        const userId = parseInt(userIdStr, 10);
+        if (!isNaN(userId)) {
+          await this.removeMissedCheckFromRedis(userId);
+          removedFromRedis++;
+        }
+      }
+
+      // Удаляем уведомления о пропущенных днях
+      const missedDayNotificationsListKey = getMissedDayNotificationsListKey();
+      const missedDayNotificationUserIds = await redis.smembers(missedDayNotificationsListKey);
+      for (const userIdStr of missedDayNotificationUserIds) {
+        const userId = parseInt(userIdStr, 10);
+        if (!isNaN(userId)) {
+          await this.removeMissedDayNotificationFromRedis(userId);
+          removedFromRedis++;
+        }
+      }
+
+      logger.info(`Removed ${removedFromRedis} notification entries from Redis`);
+
+      // Шаг 3: Получаем все активные челленджи и пересоздаем уведомления
       const activeChallenges = await challengeService.getAllActiveChallenges();
+      logger.info(`Found ${activeChallenges.length} active challenges`);
+
       let createdDailyReminders = 0;
+      let createdMissedDayNotifications = 0;
+      let skippedChallenges = 0;
 
       // Для каждого активного челленджа заново создаем напоминания
-      // Проверка пропущенных дней выполняется только в 4:00 МСК через performDailyHealthCheck
       for (const challenge of activeChallenges) {
         try {
           const user = await userService.getUser(challenge.userId);
-          const timezone = user?.timezone ?? 3;
+          if (!user) {
+            logger.warn(`User ${challenge.userId} not found, skipping challenge`);
+            skippedChallenges++;
+            continue;
+          }
+
+          const timezone = user.timezone ?? 3;
 
           // Создаем ежедневное напоминание, если оно включено
           if (challenge.reminderStatus && challenge.reminderTime) {
             const reminderTime = challenge.reminderTime.slice(0, 5); // HH:MM
+            // Вычисляем время заранее для логирования
+            const scheduledTime = this.getNextReminderTime(reminderTime, timezone);
             await this.scheduleDailyReminder(challenge.userId, reminderTime, timezone);
+            
+            logger.info(
+              `User ${challenge.userId}: Scheduled daily reminder at ${reminderTime} ` +
+              `(timezone: ${timezone >= 0 ? '+' : ''}${timezone}, scheduled: ${scheduledTime.toISOString()})`
+            );
             createdDailyReminders++;
+          }
+
+          // Если есть пропущенные дни, планируем уведомление
+          if (challenge.daysWithoutWorkout > 0) {
+            const isFailed = challenge.status === 'failed';
+            const reminderTime = challenge.reminderTime 
+              ? challenge.reminderTime.slice(0, 5) 
+              : null;
+            // Вычисляем время заранее для логирования
+            const scheduledTime = this.getNextNotificationTime(reminderTime, timezone);
+            await this.scheduleMissedDayNotification(
+              challenge.userId,
+              timezone,
+              challenge.daysWithoutWorkout,
+              isFailed
+            );
+            
+            const reminderTimeStr = reminderTime || '12:00 (default)';
+            logger.info(
+              `User ${challenge.userId}: Scheduled missed day notification ` +
+              `(${challenge.daysWithoutWorkout} days missed, ${isFailed ? 'FAILED' : 'active'}) ` +
+              `at ${reminderTimeStr} (timezone: ${timezone >= 0 ? '+' : ''}${timezone}, scheduled: ${scheduledTime.toISOString()})`
+            );
+            createdMissedDayNotifications++;
           }
         } catch (error) {
           logger.error(`Error recreating notifications for user ${challenge.userId}:`, error);
+          skippedChallenges++;
         }
       }
 
-      logger.info(`Recreated ${createdDailyReminders} daily reminders for active challenges`);
-
-      // Планируем ежедневную проверку здоровья
+      // Шаг 4: Планируем ежедневную проверку здоровья
       this.scheduleDailyHealthCheck();
+      const healthCheckTime = this.dailyHealthCheckTimeoutId 
+        ? 'scheduled' 
+        : 'not scheduled';
+      logger.info(`Daily health check: ${healthCheckTime}`);
+
+      // Итоговая статистика
+      logger.info('=== Notification restoration completed ===');
+      logger.info(
+        `Summary: ${createdDailyReminders} daily reminders, ` +
+        `${createdMissedDayNotifications} missed day notifications created, ` +
+        `${skippedChallenges} challenges skipped`
+      );
     } catch (error) {
       logger.error('Error recreating notifications:', error);
     }

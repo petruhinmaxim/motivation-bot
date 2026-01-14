@@ -24,6 +24,10 @@ export const getMissedChecksListKey = (): string => 'notification:missed:list';
 export const getNotificationLockKey = (userId: number): string => `notification:lock:${userId}`;
 export const getMissedNotificationSentKey = (userId: number): string => `notification:missed:sent:${userId}`;
 
+// Ключи для уведомлений о пропущенных днях
+export const getMissedDayNotificationDataKey = (userId: number): string => `notification:missed_day:data:${userId}`;
+export const getMissedDayNotificationsListKey = (): string => 'notification:missed_day:list';
+
 // Ключ для блокировки ежедневной проверки здоровья
 export const getDailyHealthCheckLockKey = (): string => 'notification:health_check:lock';
 
