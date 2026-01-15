@@ -763,7 +763,9 @@ class NotificationService {
           const imagePath = getMissedDayImagePath(daysWithoutWorkout);
           const photo = new InputFile(imagePath);
           const keyboard = new InlineKeyboard()
-            .text(BUTTONS.TO_CHALLENGE, 'challenge_stats');
+            // В missed-day уведомлении не редактируем исходное сообщение (часто это фото),
+            // а отправляем статистику отдельным сообщением
+            .text(BUTTONS.TO_CHALLENGE, 'challenge_stats_missed_day');
 
           await this.botApi.sendPhoto(userId, photo, {
             caption: missedWorkoutText,
@@ -775,7 +777,9 @@ class NotificationService {
           // Если не удалось отправить фото, отправляем только текст
           logger.warn(`Failed to send missed day photo for user ${userId}, sending text only:`, photoError);
           const keyboard = new InlineKeyboard()
-            .text(BUTTONS.TO_CHALLENGE, 'challenge_stats');
+            // В missed-day уведомлении не редактируем исходное сообщение (может быть фото/текст),
+            // а отправляем статистику отдельным сообщением
+            .text(BUTTONS.TO_CHALLENGE, 'challenge_stats_missed_day');
           await this.botApi.sendMessage(userId, missedWorkoutText, {
             reply_markup: keyboard,
           });

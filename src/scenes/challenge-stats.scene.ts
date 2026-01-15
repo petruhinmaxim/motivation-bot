@@ -9,6 +9,10 @@ export async function handleChallengeStatsScene(ctx: Context) {
   const userId = ctx.from?.id;
   if (!userId) return;
 
+  // Если кнопка нажата из missed-day уведомления, НЕ редактируем исходное сообщение,
+  // а отправляем статистику отдельным сообщением (исходное сообщение часто фото)
+  const isMissedDayCallback = ctx.callbackQuery?.data === 'challenge_stats_missed_day';
+
   // Получаем данные челленджа из базы
   const challenge = await challengeService.getActiveChallenge(userId);
 
@@ -16,6 +20,10 @@ export async function handleChallengeStatsScene(ctx: Context) {
     const keyboard = new InlineKeyboard()
       .text(BUTTONS.START_NEW_CHALLENGE, 'begin');
     await ctx.reply(MESSAGES.CHALLENGE_STATS.NOT_FOUND, { reply_markup: keyboard });
+    // Если это callback query — обязательно отвечаем, чтобы не было "часиков"
+    if (ctx.callbackQuery) {
+      await ctx.answerCallbackQuery();
+    }
     return;
   }
 
@@ -79,12 +87,18 @@ export async function handleChallengeStatsScene(ctx: Context) {
     .row()
     .text(BUTTONS.SEND_PHOTO, 'send_photo');
 
-  // Если это callback query (нажатие на кнопку), редактируем сообщение
   if (ctx.callbackQuery) {
-    await ctx.editMessageText(messageText, { reply_markup: keyboard });
+    if (isMissedDayCallback) {
+      // Для missed-day уведомления отправляем отдельное сообщение
+      await ctx.reply(messageText, { reply_markup: keyboard });
+    } else {
+      // По умолчанию для остальных мест сохраняем поведение: редактируем сообщение
+      await ctx.editMessageText(messageText, { reply_markup: keyboard });
+    }
     await ctx.answerCallbackQuery();
-  } else {
-    // Если это новое сообщение, отправляем новое
-    await ctx.reply(messageText, { reply_markup: keyboard });
+    return;
   }
+
+  // Если это новое сообщение, отправляем новое
+  await ctx.reply(messageText, { reply_markup: keyboard });
 }

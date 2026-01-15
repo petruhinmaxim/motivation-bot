@@ -378,6 +378,14 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         return;
       }
 
+      if (data === 'challenge_stats_missed_day') {
+        // Кнопка из уведомления о пропущенном дне:
+        // статистику отправляем новым сообщением (без попытки редактировать исходное)
+        await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
+        await handleChallengeStatsScene(ctx);
+        return;
+      }
+
       if (data === 'challenge_rules') {
         // Переходим к сцене правил челленджа
         await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_RULES' });
