@@ -12,6 +12,7 @@ import {
   getDailyHealthCheckLockKey,
   getMissedDayNotificationDataKey,
   getMissedDayNotificationsListKey,
+  getFinalMissedDaySentKey,
 } from '../redis/keys.js';
 import { challengeService } from './challenge.service.js';
 import { userService } from './user.service.js';
@@ -170,9 +171,9 @@ class NotificationService {
   private getNextNotificationTime(reminderTime: string | null, timezone: number): Date {
     const now = new Date();
     
-    // Если время не установлено, используем 12:00 МСК (timezone = 3)
+    // Если время не установлено, используем 12:00 по ЛОКАЛЬНОМУ времени пользователя
     const notificationTime = reminderTime || '12:00';
-    const notificationTimezone = reminderTime ? timezone : 3; // Если время не установлено, используем МСК
+    const notificationTimezone = timezone;
     
     const [hours, minutes] = notificationTime.split(':').map(Number);
     
@@ -625,7 +626,8 @@ class NotificationService {
     delay: number,
     challengeId: number,
     daysWithoutWorkout: number,
-    isFailed: boolean
+    isFailed: boolean,
+    persistToRedis: boolean = true
   ): Promise<void> {
     const localTime = this.getLocalTime(scheduledTime, timezone);
     const localTimeStr = this.formatLocalDateTime(localTime);
@@ -644,7 +646,7 @@ class NotificationService {
     const timeoutId = setTimeout(async () => {
       try {
         if (isFailed) {
-          await this.sendFinalMissedDayNotification(userId);
+          await this.sendFinalMissedDayNotification(userId, challengeId);
         } else {
           await this.sendMissedDayNotification(userId, daysWithoutWorkout);
         }
@@ -669,7 +671,16 @@ class NotificationService {
       scheduledTime,
     });
 
-    await this.saveMissedDayNotificationToRedis(userId, scheduledTime, timezone, challengeId, daysWithoutWorkout, isFailed);
+    if (persistToRedis) {
+      await this.saveMissedDayNotificationToRedis(
+        userId,
+        scheduledTime,
+        timezone,
+        challengeId,
+        daysWithoutWorkout,
+        isFailed
+      );
+    }
   }
 
   /**
@@ -807,13 +818,21 @@ class NotificationService {
   /**
    * Отправляет финальное уведомление о провале челленджа (3 дня пропущено)
    */
-  private async sendFinalMissedDayNotification(userId: number): Promise<void> {
+  private async sendFinalMissedDayNotification(userId: number, challengeId: number): Promise<void> {
     if (!this.botApi) {
       logger.error('Bot API is not initialized');
       return;
     }
 
     try {
+      // Дедуп: не отправляем финал повторно для одного и того же challengeId
+      const sentKey = getFinalMissedDaySentKey(userId, challengeId);
+      const alreadySent = await redis.get(sentKey);
+      if (alreadySent) {
+        logger.warn(`Final missed day notification already sent for user ${userId} (challenge ${challengeId}), skipping`);
+        return;
+      }
+
       const finalText = 'В этот раз жир одержал победу(((. Сделай паузу и приступай к новому челленджу, все получится!';
       const imagePath = getMissedDayImagePath(3);
       const photo = new InputFile(imagePath);
@@ -825,6 +844,8 @@ class NotificationService {
         reply_markup: keyboard,
       });
 
+      // Помечаем как отправленное (TTL 90 дней)
+      await redis.set(sentKey, Date.now().toString(), 'EX', 90 * 24 * 60 * 60);
       logger.info(`Final missed day notification sent to user ${userId}`);
     } catch (photoError) {
       // Если не удалось отправить фото, отправляем только текст
@@ -834,6 +855,9 @@ class NotificationService {
       await this.botApi.sendMessage(userId, 'В этот раз жир одержал победу(((. Сделай паузу и приступай к новому челленджу, все получится!', {
         reply_markup: keyboard,
       });
+      // Помечаем как отправленное (TTL 90 дней)
+      const sentKey = getFinalMissedDaySentKey(userId, challengeId);
+      await redis.set(sentKey, Date.now().toString(), 'EX', 90 * 24 * 60 * 60);
       logger.info(`Final missed day notification (text only) sent to user ${userId}`);
     }
   }
@@ -920,18 +944,87 @@ class NotificationService {
         }
       }
 
-      // Удаляем уведомления о пропущенных днях
+      logger.info(`Removed ${removedFromRedis} notification entries from Redis`);
+
+      // Шаг 2.5: Восстанавливаем уведомления о пропущенных днях из Redis (не удаляем их)
       const missedDayNotificationsListKey = getMissedDayNotificationsListKey();
       const missedDayNotificationUserIds = await redis.smembers(missedDayNotificationsListKey);
+      let restoredMissedDayNotifications = 0;
+      let removedInvalidMissedDayNotifications = 0;
+
       for (const userIdStr of missedDayNotificationUserIds) {
         const userId = parseInt(userIdStr, 10);
-        if (!isNaN(userId)) {
-          await this.removeMissedDayNotificationFromRedis(userId);
-          removedFromRedis++;
+        if (isNaN(userId)) {
+          continue;
+        }
+
+        try {
+          const dataJson = await redis.get(getMissedDayNotificationDataKey(userId));
+          if (!dataJson) {
+            // В списке есть, а данных нет — чистим список
+            await redis.srem(missedDayNotificationsListKey, userIdStr);
+            removedInvalidMissedDayNotifications++;
+            continue;
+          }
+
+          const data = JSON.parse(dataJson) as MissedDayNotificationData;
+          const scheduledTime = new Date(data.scheduledTime);
+          const delay = scheduledTime.getTime() - Date.now();
+
+          // Валидация
+          if (
+            !data ||
+            data.userId !== userId ||
+            !data.scheduledTime ||
+            Number.isNaN(scheduledTime.getTime()) ||
+            typeof data.timezone !== 'number' ||
+            typeof data.challengeId !== 'number' ||
+            typeof data.daysWithoutWorkout !== 'number' ||
+            typeof data.isFailed !== 'boolean'
+          ) {
+            await this.removeMissedDayNotificationFromRedis(userId);
+            removedInvalidMissedDayNotifications++;
+            continue;
+          }
+
+          // Просроченные уведомления удаляем — ночная проверка пересоздаст при необходимости
+          if (delay <= 0) {
+            await this.removeMissedDayNotificationFromRedis(userId);
+            removedInvalidMissedDayNotifications++;
+            continue;
+          }
+
+          // Планируем восстановленное уведомление в памяти
+          const existing = this.missedDayNotifications.get(userId);
+          if (existing) {
+            clearTimeout(existing.timeoutId);
+            this.missedDayNotifications.delete(userId);
+          }
+          await this.scheduleMissedDayNotificationInternal(
+            userId,
+            data.timezone,
+            scheduledTime,
+            delay,
+            data.challengeId,
+            data.daysWithoutWorkout,
+            data.isFailed,
+            true
+          );
+
+          restoredMissedDayNotifications++;
+        } catch (error) {
+          logger.warn(`Failed to restore missed day notification for user ${userIdStr}, removing:`, error);
+          const userId = parseInt(userIdStr, 10);
+          if (!isNaN(userId)) {
+            await this.removeMissedDayNotificationFromRedis(userId);
+            removedInvalidMissedDayNotifications++;
+          }
         }
       }
 
-      logger.info(`Removed ${removedFromRedis} notification entries from Redis`);
+      logger.info(
+        `Restored ${restoredMissedDayNotifications} missed day notifications from Redis, removed ${removedInvalidMissedDayNotifications} invalid/expired entries`
+      );
 
       // Шаг 3: Получаем все активные челленджи и пересоздаем уведомления
       const activeChallenges = await challengeService.getAllActiveChallenges();
@@ -968,7 +1061,7 @@ class NotificationService {
           }
 
           // Если есть пропущенные дни, планируем уведомление
-          if (challenge.daysWithoutWorkout > 0) {
+          if (challenge.daysWithoutWorkout > 0 && !this.hasMissedDayNotification(challenge.userId)) {
             const isFailed = challenge.status === 'failed';
             const reminderTime = challenge.reminderTime 
               ? challenge.reminderTime.slice(0, 5) 
@@ -1058,6 +1151,55 @@ class NotificationService {
             challenge.userId,
             timezone
           );
+
+          // ВАЖНО: если во время этой проверки челлендж стал failed,
+          // active-челлендж больше не будет доступен через getActiveChallenge().
+          // Планируем финальное уведомление сразу, без зависимости от getActiveChallenge().
+          if (wasFailed) {
+            failedCount++;
+            // Челлендж провален, отменяем проверки и уведомления
+            this.cancelMissedDaysCheck(challenge.userId);
+            this.cancelMissedDayNotification(challenge.userId);
+            this.cancelDailyReminder(challenge.userId);
+
+            const latestChallenge = await challengeService.getLatestChallenge(challenge.userId);
+            if (!latestChallenge) {
+              logger.warn(`Challenge failed for user ${challenge.userId} but latest challenge not found, cannot schedule final notification`);
+              continue;
+            }
+
+            // reminderTime может быть не задан — тогда используем 12:00 локального времени пользователя
+            const reminderTime = latestChallenge.reminderTime ? latestChallenge.reminderTime.slice(0, 5) : null;
+            const scheduledTime = this.getNextNotificationTime(reminderTime, timezone);
+            const delay = scheduledTime.getTime() - Date.now();
+
+            if (delay <= 0) {
+              const tomorrowTime = this.getNextNotificationTime(reminderTime, timezone);
+              const tomorrowDelay = tomorrowTime.getTime() - Date.now();
+              await this.scheduleMissedDayNotificationInternal(
+                challenge.userId,
+                timezone,
+                tomorrowTime,
+                tomorrowDelay,
+                latestChallenge.id,
+                3,
+                true
+              );
+            } else {
+              await this.scheduleMissedDayNotificationInternal(
+                challenge.userId,
+                timezone,
+                scheduledTime,
+                delay,
+                latestChallenge.id,
+                3,
+                true
+              );
+            }
+
+            logger.info(`Challenge failed for user ${challenge.userId} during health check, final notification scheduled`);
+            continue;
+          }
 
           // Получаем обновленный челлендж после проверки
           const updatedChallenge = await challengeService.getActiveChallenge(challenge.userId);

@@ -28,6 +28,10 @@ export const getMissedNotificationSentKey = (userId: number): string => `notific
 export const getMissedDayNotificationDataKey = (userId: number): string => `notification:missed_day:data:${userId}`;
 export const getMissedDayNotificationsListKey = (): string => 'notification:missed_day:list';
 
+// Дедуп финального уведомления (3-й пропуск) на конкретный челлендж
+export const getFinalMissedDaySentKey = (userId: number, challengeId: number): string =>
+  `notification:missed_day:final:sent:${userId}:${challengeId}`;
+
 // Ключ для блокировки ежедневной проверки здоровья
 export const getDailyHealthCheckLockKey = (): string => 'notification:health_check:lock';
 

@@ -111,6 +111,21 @@ export class ChallengeService {
   }
 
   /**
+   * Получает последний челлендж пользователя (самый новый по id), независимо от статуса
+   * Нужен, например, чтобы планировать финальное уведомление после перевода в failed.
+   */
+  async getLatestChallenge(userId: number) {
+    const result = await db
+      .select()
+      .from(challenges)
+      .where(eq(challenges.userId, userId))
+      .orderBy(desc(challenges.id))
+      .limit(1);
+
+    return result[0] || null;
+  }
+
+  /**
    * Обновляет дату старта активного челленджа
    */
   async updateChallengeStartDate(userId: number, newStartDate: Date): Promise<void> {
