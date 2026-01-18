@@ -837,7 +837,9 @@ class NotificationService {
       const imagePath = getMissedDayImagePath(3);
       const photo = new InputFile(imagePath);
       const keyboard = new InlineKeyboard()
-        .text(BUTTONS.START_NEW_CHALLENGE, 'begin');
+        // В сообщении о проваленном челлендже часто фото — редактирование по кнопке ломается.
+        // Поэтому по "К челленджу" отправляем стартовую сцену НОВЫМ сообщением.
+        .text(BUTTONS.TO_CHALLENGE, 'start_from_failed_challenge_notification');
 
       await this.botApi.sendPhoto(userId, photo, {
         caption: finalText,
@@ -851,7 +853,7 @@ class NotificationService {
       // Если не удалось отправить фото, отправляем только текст
       logger.warn(`Failed to send final missed day photo for user ${userId}, sending text only:`, photoError);
       const keyboard = new InlineKeyboard()
-        .text(BUTTONS.START_NEW_CHALLENGE, 'begin');
+        .text(BUTTONS.TO_CHALLENGE, 'start_from_failed_challenge_notification');
       await this.botApi.sendMessage(userId, 'В этот раз жир одержал победу(((. Сделай паузу и приступай к новому челленджу, все получится!', {
         reply_markup: keyboard,
       });

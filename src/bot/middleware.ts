@@ -386,6 +386,23 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         return;
       }
 
+      if (data === 'start_from_failed_challenge_notification') {
+        // Кнопка из сообщения о проваленном челлендже (часто это фото):
+        // стартовую сцену отправляем НОВЫМ сообщением, без попытки редактировать исходное.
+        await stateService.sendEvent(userId, { type: 'GO_TO_START' });
+        await ctx.answerCallbackQuery();
+
+        const mockContext = {
+          from: ctx.from,
+          chat: ctx.chat,
+          api: ctx.api,
+          reply: ctx.reply.bind(ctx),
+        } as any;
+
+        await handleStartScene(mockContext);
+        return;
+      }
+
       if (data === 'challenge_rules') {
         // Переходим к сцене правил челленджа
         await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_RULES' });
