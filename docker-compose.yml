@@ -29,6 +29,36 @@ services:
       timeout: 5s
       retries: 5
 
+  bot:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: motivation_bot_app_dev
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-motivation_bot}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  dashboard:
+    profiles: ["app"]
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: motivation_bot_dashboard_dev
+    ports:
+      - "8080:8080"
+    depends_on:
+      - bot
+
 volumes:
   postgres_data:
   redis_data:

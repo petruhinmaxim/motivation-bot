@@ -5,10 +5,12 @@ import { db, closeDatabase } from './database/client.js';
 import logger from './utils/logger.js';
 import { notificationService } from './services/notification.service.js';
 import { closeRedis } from './redis/client.js';
+import { startHttpServer } from './api/http-server.js';
 
 dotenv.config();
 
 let isShuttingDown = false;
+let httpServer: import('node:http').Server | undefined;
 
 async function shutdown(signal: string): Promise<void> {
   if (isShuttingDown) {
@@ -29,6 +31,15 @@ async function shutdown(signal: string): Promise<void> {
     logger.info('Stopping bot...');
     await bot.stop();
     logger.info('Bot stopped');
+
+    // Останавливаем HTTP сервер
+    if (httpServer) {
+      logger.info('Stopping HTTP server...');
+      await new Promise<void>((resolve, reject) => {
+        httpServer?.close((err?: Error) => (err ? reject(err) : resolve()));
+      });
+      logger.info('HTTP server stopped');
+    }
 
     // Закрываем соединения с БД и Redis
     logger.info('Closing database connections...');
@@ -54,6 +65,9 @@ async function start() {
     logger.info('Running database migrations...');
     await migrate(db, { migrationsFolder: './src/database/migrations' });
     logger.info('✅ Database migrations completed');
+
+    // Запускаем HTTP API (для дашборда)
+    httpServer = startHttpServer();
 
     // Запускаем бота (не ждем завершения, так как bot.start() может не завершиться)
     logger.info('Starting bot...');

@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* a tiny default */
+html, body {
+  height: 100%;
+}
+
