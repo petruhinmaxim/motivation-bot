@@ -20,15 +20,12 @@ BOT_TOKEN=your_bot_token_here
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=your_secure_password_here
 POSTGRES_DB=motivation_bot
-POSTGRES_HOST=postgres
-POSTGRES_PORT=5432
 
 # Redis (обязательно)
 REDIS_PASSWORD=your_redis_password_here
 
 # Опционально
 LOG_LEVEL=info  # error, warn, info, debug
-HTTP_PORT=3000 # HTTP API для дашборда (внутри Docker сети), по умолчанию 3000
 ```
 
 **⚠️ ВАЖНО:** Не коммитьте файл `.env` в Git! Он должен быть в `.gitignore`.
@@ -86,14 +83,6 @@ docker compose -f docker-compose.prod.yml ps
 
 # Просмотрите логи
 docker compose -f docker-compose.prod.yml logs -f bot
-```
-
-После запуска **дашборд** будет доступен на порту **8080** (например `http://<server>:8080`).
-
-Для локального запуска (dev) можно использовать:
-
-```bash
-docker compose --profile app up -d --build
 ```
 
 4. **Проверьте работу бота:**
