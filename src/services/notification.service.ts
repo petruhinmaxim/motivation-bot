@@ -18,10 +18,11 @@ import { challengeService } from './challenge.service.js';
 import { userService } from './user.service.js';
 import { getRandomReminderPhrase } from '../utils/motivational-phrases.js';
 import { getMissedDayImagePath } from '../utils/missed-days-images.js';
+import { getRandomMissedDaysText } from '../utils/missed-days-texts.js';
 import { getYesterdayDateString } from '../utils/date-utils.js';
 import { handleChallengeStatsScene } from '../scenes/challenge-stats.scene.js';
 import { handleTelegramError } from '../utils/telegram-error-handler.js';
-import { BUTTONS, MESSAGES } from '../scenes/messages.js';
+import { BUTTONS } from '../scenes/messages.js';
 
 interface DailyReminderData {
   userId: number;
@@ -736,6 +737,15 @@ class NotificationService {
     }
 
     try {
+      if (daysWithoutWorkout > 2) {
+        // По логике активного челленджа сюда должны попадать только 1–2.
+        // 3 дня — это "провал" и отправляется отдельным методом.
+        logger.warn(
+          `Unexpected daysWithoutWorkout=${daysWithoutWorkout} for sendMissedDayNotification(user=${userId}). ` +
+            `Clamping to 2 and continuing.`
+        );
+      }
+
       // Используем Redis lock для предотвращения дубликатов
       const lockKey = getNotificationLockKey(userId);
       const lockValue = Date.now().toString();
@@ -767,7 +777,10 @@ class NotificationService {
           }
         }
 
-        const missedWorkoutText = MESSAGES.MISSED_WORKOUT.TEXT;
+        // Для уведомления о пропуске дня используем случайный текст из набора.
+        // На всякий случай нормализуем значение: это уведомление рассчитано на 1–2 дня.
+        const normalizedDays = Math.max(1, Math.min(2, daysWithoutWorkout));
+        const missedWorkoutText = getRandomMissedDaysText(normalizedDays);
 
         // Отправляем фото
         try {
@@ -824,6 +837,8 @@ class NotificationService {
       return;
     }
 
+    const finalText = getRandomMissedDaysText(3);
+
     try {
       // Дедуп: не отправляем финал повторно для одного и того же challengeId
       const sentKey = getFinalMissedDaySentKey(userId, challengeId);
@@ -833,7 +848,6 @@ class NotificationService {
         return;
       }
 
-      const finalText = 'В этот раз жир одержал победу(((. Сделай паузу и приступай к новому челленджу, все получится!';
       const imagePath = getMissedDayImagePath(3);
       const photo = new InputFile(imagePath);
       const keyboard = new InlineKeyboard()
@@ -854,7 +868,7 @@ class NotificationService {
       logger.warn(`Failed to send final missed day photo for user ${userId}, sending text only:`, photoError);
       const keyboard = new InlineKeyboard()
         .text(BUTTONS.TO_CHALLENGE, 'start_from_failed_challenge_notification');
-      await this.botApi.sendMessage(userId, 'В этот раз жир одержал победу(((. Сделай паузу и приступай к новому челленджу, все получится!', {
+      await this.botApi.sendMessage(userId, finalText, {
         reply_markup: keyboard,
       });
       // Помечаем как отправленное (TTL 90 дней)
