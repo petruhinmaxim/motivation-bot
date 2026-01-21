@@ -86,9 +86,9 @@ class SchedulerService {
 
           // Восстанавливаем задачу
           if (task.type === 'tomorrow') {
-            this.scheduleTomorrowDuration(task.userId);
+            this.scheduleTomorrowDuration(task.userId, scheduledTime);
           } else if (task.type === 'monday') {
-            this.scheduleMondayDuration(task.userId);
+            this.scheduleMondayDuration(task.userId, scheduledTime);
           }
           restoredCount++;
         }
@@ -236,20 +236,13 @@ class SchedulerService {
     
     // Получаем день недели в МСК (0 = воскресенье, 1 = понедельник, ...)
     const dayOfWeek = mskDate.getUTCDay();
-    const currentHour = mskDate.getUTCHours();
-    const currentMinute = mskDate.getUTCMinutes();
     
     let daysUntilMonday: number;
     
     // Если сегодня понедельник
     if (dayOfWeek === 1) {
-      // Если уже прошло 12:00, берем следующий понедельник (через 7 дней)
-      if (currentHour > 12 || (currentHour === 12 && currentMinute > 0)) {
-        daysUntilMonday = 7;
-      } else {
-        // Еще не 12:00, используем сегодня
-        daysUntilMonday = 0;
-      }
+      // Всегда планируем на СЛЕДУЮЩИЙ понедельник (через 7 дней), даже если сейчас понедельник до 12:00 МСК
+      daysUntilMonday = 7;
     } else {
       // Вычисляем количество дней до следующего понедельника
       // dayOfWeek: 0=воскр, 1=пн, 2=вт, 3=ср, 4=чт, 5=пт, 6=сб
@@ -269,31 +262,77 @@ class SchedulerService {
   }
 
   /**
-   * Получает время завтра в 12:00 МСК
+   * Получает время следующего понедельника
+   * в то же время (час/минута по МСК), что и заданная дата.
+   *
+   * Важно: даже если сегодня понедельник, планируем на СЛЕДУЮЩИЙ (через 7 дней).
    */
-  getTomorrow12MSK(): Date {
-    const now = new Date();
+  getNextMondaySameTimeMSK(from: Date = new Date()): Date {
+    // МСК = UTC+3
+    const mskOffset = 3 * 60 * 60 * 1000;
+
+    // Получаем текущее время в МСК
+    const mskTime = from.getTime() + mskOffset;
+    const mskDate = new Date(mskTime);
+
+    // День недели в МСК (0 = воскресенье, 1 = понедельник, ...)
+    const dayOfWeek = mskDate.getUTCDay();
+
+    // Время (часы/минуты) на момент нажатия (в МСК)
+    const hour = mskDate.getUTCHours();
+    const minute = mskDate.getUTCMinutes();
+
+    let daysUntilMonday: number;
+
+    // Если сегодня понедельник — всегда берем следующий (через 7 дней)
+    if (dayOfWeek === 1) {
+      daysUntilMonday = 7;
+    } else {
+      // dayOfWeek: 0=воскр, 1=пн, 2=вт, 3=ср, 4=чт, 5=пт, 6=сб
+      daysUntilMonday = (8 - dayOfWeek) % 7;
+      if (daysUntilMonday === 0) {
+        daysUntilMonday = 7;
+      }
+    }
+
+    const targetMSK = new Date(mskDate);
+    targetMSK.setUTCDate(mskDate.getUTCDate() + daysUntilMonday);
+    targetMSK.setUTCHours(hour, minute, 0, 0);
+
+    // Конвертируем обратно в UTC
+    return new Date(targetMSK.getTime() - mskOffset);
+  }
+
+  /**
+   * Получает время завтра
+   * в то же время (час/минута по МСК), что и заданная дата.
+   */
+  getTomorrowSameTimeMSK(from: Date = new Date()): Date {
     // МСК = UTC+3
     const mskOffset = 3 * 60 * 60 * 1000;
     
     // Получаем текущее время в МСК
-    const mskTime = now.getTime() + mskOffset;
+    const mskTime = from.getTime() + mskOffset;
     const mskDate = new Date(mskTime);
 
-    // Завтра в 12:00 МСК
+    const hour = mskDate.getUTCHours();
+    const minute = mskDate.getUTCMinutes();
+
+    // Завтра в то же время (час/минута) по МСК
     const tomorrow = new Date(mskDate);
     tomorrow.setUTCDate(mskDate.getUTCDate() + 1);
-    tomorrow.setUTCHours(12, 0, 0, 0);
+    tomorrow.setUTCHours(hour, minute, 0, 0);
 
     // Конвертируем обратно в UTC
     return new Date(tomorrow.getTime() - mskOffset);
   }
 
   /**
-   * Планирует отправку сцены уведомления о старте челленджа завтра в 12:00 МСК
+   * Планирует отправку сцены уведомления о старте челленджа завтра
+   * в то же время (час/минута по МСК), когда пользователь нажал кнопку.
    */
-  scheduleTomorrowDuration(userId: number): void {
-    const scheduledTime = this.getTomorrow12MSK();
+  scheduleTomorrowDuration(userId: number, scheduledTimeOverride?: Date): void {
+    const scheduledTime = scheduledTimeOverride ?? this.getTomorrowSameTimeMSK();
     
     this.scheduleMessage(userId, scheduledTime, async () => {
       if (!this.botApi) {
@@ -338,10 +377,11 @@ class SchedulerService {
   }
 
   /**
-   * Планирует отправку сцены уведомления о старте челленджа в следующий понедельник в 12:00 МСК
+   * Планирует отправку сцены уведомления о старте челленджа
+   * в следующий понедельник в то же время (час/минута по МСК), когда нажали кнопку.
    */
-  scheduleMondayDuration(userId: number): void {
-    const scheduledTime = this.getNextMonday12MSK();
+  scheduleMondayDuration(userId: number, scheduledTimeOverride?: Date): void {
+    const scheduledTime = scheduledTimeOverride ?? this.getNextMondaySameTimeMSK();
     
     this.scheduleMessage(userId, scheduledTime, async () => {
       if (!this.botApi) {

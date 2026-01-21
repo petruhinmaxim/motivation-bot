@@ -4,6 +4,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { db, closeDatabase } from './database/client.js';
 import logger from './utils/logger.js';
 import { notificationService } from './services/notification.service.js';
+import { schedulerService } from './services/scheduler.service.js';
 import { closeRedis } from './redis/client.js';
 
 dotenv.config();
@@ -69,9 +70,16 @@ async function start() {
       // Не прерываем запуск, но логируем ошибку
     });
 
-    // Ждем завершения восстановления уведомлений (это важнее для работы)
-    await notificationsPromise;
-    logger.info('✅ Notifications restored');
+    // Запускаем восстановление отложенных задач (перенос старта "на завтра/понедельник") параллельно
+    logger.info('Restoring scheduled tasks...');
+    const scheduledTasksPromise = schedulerService.restoreTasks().catch((error) => {
+      logger.error('Error restoring scheduled tasks:', error);
+      // Не прерываем запуск, но логируем ошибку
+    });
+
+    // Ждем завершения восстановления (важно для корректной работы)
+    await Promise.all([notificationsPromise, scheduledTasksPromise]);
+    logger.info('✅ Notifications and scheduled tasks restored');
 
     // Пытаемся дождаться запуска бота с таймаутом
     logger.info('Waiting for bot to start (with timeout)...');
