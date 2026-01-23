@@ -798,6 +798,17 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
     // Обрабатываем фото
     if (ctx.message?.photo) {
       const userId = ctx.from.id;
+      // Любое фото (в любой сцене) отменяет уведомление "пропущен день",
+      // если оно запланировано на этот же локальный день.
+      try {
+        const user = await userService.getUser(userId);
+        const timezone = user?.timezone ?? 3;
+        const receivedAtUtc = new Date(ctx.message.date * 1000);
+        await notificationService.registerAnyPhotoReceived(userId, timezone, receivedAtUtc);
+      } catch (e) {
+        logger.warn(`Failed to register any-photo marker for user ${userId}:`, e);
+      }
+
       // Получаем самое большое фото (обычно последнее в массиве)
       const photo = ctx.message.photo[ctx.message.photo.length - 1];
       
@@ -832,6 +843,17 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       const isImageByExtension = imageExtensions.some(ext => fileName.endsWith(ext));
       
       if (isImageByMime || isImageByExtension) {
+        // Любая картинка-документ (в любой сцене) отменяет уведомление "пропущен день",
+        // если оно запланировано на этот же локальный день.
+        try {
+          const user = await userService.getUser(userId);
+          const timezone = user?.timezone ?? 3;
+          const receivedAtUtc = new Date(ctx.message.date * 1000);
+          await notificationService.registerAnyPhotoReceived(userId, timezone, receivedAtUtc);
+        } catch (e) {
+          logger.warn(`Failed to register any-photo marker for user ${userId}:`, e);
+        }
+
         await processImageFromFile(document.file_id, userId, document.file_size);
         return;
       } else {

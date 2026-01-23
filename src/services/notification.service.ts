@@ -13,13 +13,14 @@ import {
   getMissedDayNotificationDataKey,
   getMissedDayNotificationsListKey,
   getFinalMissedDaySentKey,
+  getAnyPhotoReceivedKey,
 } from '../redis/keys.js';
 import { challengeService } from './challenge.service.js';
 import { userService } from './user.service.js';
 import { getRandomReminderPhrase } from '../utils/motivational-phrases.js';
 import { getMissedDayImagePath } from '../utils/missed-days-images.js';
 import { getRandomMissedDaysText } from '../utils/missed-days-texts.js';
-import { getYesterdayDateString } from '../utils/date-utils.js';
+import { formatDateToString, getYesterdayDateString } from '../utils/date-utils.js';
 import { handleChallengeStatsScene } from '../scenes/challenge-stats.scene.js';
 import { handleTelegramError } from '../utils/telegram-error-handler.js';
 import { BUTTONS } from '../scenes/messages.js';
@@ -73,6 +74,7 @@ class NotificationService {
   private missedDayNotifications = new Map<number, ScheduledMissedDayNotification>();
   private botApi: Api | null = null;
   private dailyHealthCheckTimeoutId: NodeJS.Timeout | null = null;
+  private anyPhotoTTLSeconds = 60 * 60 * 48; // 48 часов — достаточно, чтобы покрыть "сегодня" и возможные задержки
 
   /**
    * Устанавливает API бота
@@ -127,6 +129,69 @@ class NotificationService {
     const hours = String(localTime.getUTCHours()).padStart(2, '0');
     const minutes = String(localTime.getUTCMinutes()).padStart(2, '0');
     return `${year}-${month}-${day} ${hours}:${minutes}`;
+  }
+
+  /**
+   * Сохраняет факт "получено любое фото" и отменяет "пропущен день",
+   * если уведомление запланировано на этот же локальный день.
+   */
+  async registerAnyPhotoReceived(userId: number, timezone: number, receivedAtUtc: Date): Promise<void> {
+    const localDate = formatDateToString(receivedAtUtc, timezone);
+
+    try {
+      await redis.set(
+        getAnyPhotoReceivedKey(userId, localDate),
+        receivedAtUtc.toISOString(),
+        'EX',
+        this.anyPhotoTTLSeconds
+      );
+    } catch (error) {
+      logger.error(`Error saving any-photo marker for user ${userId} (${localDate}):`, error);
+    }
+
+    // Если "пропущен день" запланирован на этот же локальный день — отменяем.
+    await this.cancelMissedDayNotificationIfScheduledForLocalDate(userId, timezone, localDate);
+  }
+
+  private async cancelMissedDayNotificationIfScheduledForLocalDate(
+    userId: number,
+    timezone: number,
+    localDate: string
+  ): Promise<void> {
+    const scheduledTime = await this.getMissedDayScheduledTime(userId);
+    if (!scheduledTime) {
+      return;
+    }
+
+    const scheduledLocalDate = formatDateToString(scheduledTime, timezone);
+    if (scheduledLocalDate !== localDate) {
+      return;
+    }
+
+    logger.info(
+      `Cancelling missed day notification for user ${userId}: photo received on ${localDate} (timezone ${timezone})`
+    );
+    this.cancelMissedDayNotification(userId);
+  }
+
+  private async getMissedDayScheduledTime(userId: number): Promise<Date | null> {
+    const inMemory = this.missedDayNotifications.get(userId);
+    if (inMemory?.scheduledTime) {
+      return inMemory.scheduledTime;
+    }
+
+    try {
+      const dataJson = await redis.get(getMissedDayNotificationDataKey(userId));
+      if (!dataJson) return null;
+      const data = JSON.parse(dataJson) as Partial<MissedDayNotificationData>;
+      if (!data?.scheduledTime) return null;
+      const dt = new Date(data.scheduledTime);
+      if (Number.isNaN(dt.getTime())) return null;
+      return dt;
+    } catch (error) {
+      logger.warn(`Failed to read missed day notification data for user ${userId}:`, error);
+      return null;
+    }
   }
 
   /**
@@ -590,6 +655,22 @@ class NotificationService {
     const now = new Date();
     const delay = scheduledTime.getTime() - now.getTime();
 
+    // Если на локальную дату этого уведомления уже приходило ЛЮБОЕ фото — не планируем (требование: отменять).
+    const scheduledLocalDate = formatDateToString(scheduledTime, timezone);
+    try {
+      const anyPhoto = await redis.get(getAnyPhotoReceivedKey(userId, scheduledLocalDate));
+      if (anyPhoto) {
+        logger.info(
+          `Skipping missed day notification for user ${userId}: photo already received on ${scheduledLocalDate} (timezone ${timezone})`
+        );
+        await this.removeMissedDayNotificationFromRedis(userId);
+        return;
+      }
+    } catch (error) {
+      logger.warn(`Error checking any-photo marker for user ${userId}:`, error);
+      // Не блокируем планирование, если Redis временно недоступен
+    }
+
     if (delay <= 0) {
       // Время уже прошло, планируем на завтра
       const tomorrowTime = this.getNextNotificationTime(reminderTime, timezone);
@@ -646,6 +727,18 @@ class NotificationService {
 
     const timeoutId = setTimeout(async () => {
       try {
+        // Защита от задержек/очередей: если в этот день уже приходило ЛЮБОЕ фото — не отправляем.
+        const scheduledLocalDate = formatDateToString(scheduledTime, timezone);
+        const anyPhoto = await redis.get(getAnyPhotoReceivedKey(userId, scheduledLocalDate));
+        if (anyPhoto) {
+          logger.info(
+            `Skipping missed day notification send for user ${userId}: photo received on ${scheduledLocalDate} (timezone ${timezone})`
+          );
+          this.missedDayNotifications.delete(userId);
+          await this.removeMissedDayNotificationFromRedis(userId);
+          return;
+        }
+
         if (isFailed) {
           await this.sendFinalMissedDayNotification(userId, challengeId);
         } else {
@@ -692,9 +785,10 @@ class NotificationService {
     if (notification) {
       clearTimeout(notification.timeoutId);
       this.missedDayNotifications.delete(userId);
-      this.removeMissedDayNotificationFromRedis(userId);
       logger.info(`Cancelled missed day notification for user ${userId}`);
     }
+    // Важно: убираем запись из Redis даже если в памяти не было (например, после рестарта)
+    this.removeMissedDayNotificationFromRedis(userId);
   }
 
   /**

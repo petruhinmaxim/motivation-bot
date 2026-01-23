@@ -9,6 +9,10 @@ export const getScheduledTaskDataKey = (userId: number): string => `scheduler:ta
 // Ключ для отслеживания загрузки фото за день (формат: YYYY-MM-DD)
 export const getPhotoUploadKey = (userId: number, date: string): string => `photo_upload:${userId}:${date}`;
 
+// Ключ для отслеживания ЛЮБОГО полученного фото/картинки за день (формат: YYYY-MM-DD)
+// Используется, чтобы отменять "пропущен день", даже если фото прислали вне нужной сцены.
+export const getAnyPhotoReceivedKey = (userId: number, date: string): string => `photo_received:${userId}:${date}`;
+
 // Ключи для таймеров бездействия
 export const getIdleTimerKey = (userId: number): string => `idle_timer:${userId}`;
 
