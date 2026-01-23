@@ -253,30 +253,56 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       }
 
       if (data === 'start_tomorrow' || data === 'start_tomorrow_from_notification') {
+        // Если челлендж уже активен — ведем в статистику
+        const activeChallenge = await challengeService.getActiveChallenge(userId);
+        if (activeChallenge) {
+          // На всякий случай отменяем отложенный старт, чтобы не присылал уведомление
+          schedulerService.cancelTask(userId);
+          idleTimerService.cancelIdleTimer(userId);
+          await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
+          await handleChallengeStatsScene(ctx);
+          return;
+        }
+
         // Отменяем таймер бездействия при выходе со сцены begin (если не из уведомления)
         if (data === 'start_tomorrow') {
           idleTimerService.cancelIdleTimer(userId);
-          await stateService.sendEvent(userId, { type: 'GO_TO_TOMORROW' });
-          await handleTomorrowScene(ctx);
         }
+
         // Отменяем предыдущее уведомление и создаем новое на завтра
         schedulerService.cancelTask(userId);
         schedulerService.scheduleTomorrowDuration(userId);
-        await ctx.answerCallbackQuery();
+
+        // Поведение как при первом выборе старта: переключаем сцену и редактируем сообщение
+        await stateService.sendEvent(userId, { type: 'GO_TO_TOMORROW' });
+        await handleTomorrowScene(ctx);
         return;
       }
 
       if (data === 'start_monday' || data === 'start_monday_from_notification') {
+        // Если челлендж уже активен — ведем в статистику
+        const activeChallenge = await challengeService.getActiveChallenge(userId);
+        if (activeChallenge) {
+          // На всякий случай отменяем отложенный старт, чтобы не присылал уведомление
+          schedulerService.cancelTask(userId);
+          idleTimerService.cancelIdleTimer(userId);
+          await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
+          await handleChallengeStatsScene(ctx);
+          return;
+        }
+
         // Отменяем таймер бездействия при выходе со сцены begin (если не из уведомления)
         if (data === 'start_monday') {
           idleTimerService.cancelIdleTimer(userId);
-          await stateService.sendEvent(userId, { type: 'GO_TO_MONDAY' });
-          await handleMondayScene(ctx);
         }
+
         // Отменяем предыдущее уведомление и создаем новое на понедельник
         schedulerService.cancelTask(userId);
         schedulerService.scheduleMondayDuration(userId);
-        await ctx.answerCallbackQuery();
+
+        // Поведение как при первом выборе старта: переключаем сцену и редактируем сообщение
+        await stateService.sendEvent(userId, { type: 'GO_TO_MONDAY' });
+        await handleMondayScene(ctx);
         return;
       }
 
