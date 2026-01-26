@@ -528,9 +528,15 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       if (data === 'send_photo') {
         // Отправляем сообщение с просьбой отправить фото
         await ctx.answerCallbackQuery();
-        await ctx.reply(MESSAGES.PHOTO.SEND_REQUEST);
-        // Переводим пользователя в сцену ожидания фото
+        // Переводим пользователя в сцену ожидания фото ПЕРЕД отправкой сообщения
+        // Это гарантирует, что состояние будет сохранено до того, как пользователь загрузит фото
         await stateService.sendEvent(userId, { type: 'GO_TO_WAITING_FOR_PHOTO' });
+        // Проверяем, что состояние действительно изменилось
+        const verifyScene = await stateService.getCurrentScene(userId);
+        if (verifyScene !== 'waiting_for_photo') {
+          logger.error(`State mismatch after GO_TO_WAITING_FOR_PHOTO for user ${userId}. Expected: waiting_for_photo, got: ${verifyScene}`);
+        }
+        await ctx.reply(MESSAGES.PHOTO.SEND_REQUEST);
         return;
       }
 
@@ -679,21 +685,31 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
     async function processImageFromFile(fileId: string, userId: number, fileSize?: number) {
       const currentScene = await stateService.getCurrentScene(userId);
       
+      // Логируем текущую сцену для диагностики
+      logger.debug(`Processing photo for user ${userId}, current scene: ${currentScene}`);
+      
+      // Проверяем активный челлендж один раз - используем результат для обеих проверок
+      const challenge = await challengeService.getActiveChallenge(userId);
+      
       // Разрешаем обработку фото в challenge_stats и waiting_for_photo
+      // Также разрешаем обработку из других сцен, если у пользователя есть активный челлендж
+      // Это позволяет обрабатывать фото даже если состояние не успело сохраниться
       if (currentScene !== 'waiting_for_photo' && currentScene !== 'challenge_stats') {
-        // Если пользователь не в сцене статистики или ожидания фото, отправляем сообщение и переводим на статистику
-        await ctx.reply(MESSAGES.PHOTO.CLICK_BUTTON);
-        await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
-        await handleChallengeStatsScene(ctx);
-        return;
+        if (challenge && challenge.status === 'active') {
+          // У пользователя есть активный челлендж, обрабатываем фото
+          logger.info(`Processing photo for user ${userId} from scene ${currentScene} (has active challenge)`);
+        } else {
+          // Если пользователь не в сцене статистики или ожидания фото и нет активного челленджа,
+          // отправляем сообщение и переводим на статистику
+          logger.warn(`User ${userId} tried to upload photo from scene ${currentScene}, redirecting to challenge_stats`);
+          await ctx.reply(MESSAGES.PHOTO.CLICK_BUTTON);
+          await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
+          await handleChallengeStatsScene(ctx);
+          return;
+        }
       }
       
-      const user = await userService.getUser(userId);
-      const timezoneOffset = user?.timezone ?? null;
-      const currentDate = getCurrentDateString(timezoneOffset);
-
-      // Проверяем, есть ли активный челлендж
-      const challenge = await challengeService.getActiveChallenge(userId);
+      // Проверяем, есть ли активный челлендж (если еще не проверили выше)
       if (!challenge) {
         await ctx.reply(MESSAGES.CHALLENGE.NOT_ACTIVE);
         return;
@@ -706,6 +722,10 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         await handleStartScene(ctx);
         return;
       }
+      
+      const user = await userService.getUser(userId);
+      const timezoneOffset = user?.timezone ?? null;
+      const currentDate = getCurrentDateString(timezoneOffset);
 
       // Проверяем, было ли уже загружено фото сегодня (для отображения сообщения)
       const alreadyUploaded = await challengeService.hasPhotoUploadedToday(userId, currentDate);
