@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { challenges, users } from '@motivation-bot/schema';
+import { challenges, users } from '@/lib/schema';
 import { desc, eq, sql } from 'drizzle-orm';
 
 export async function GET(request: NextRequest) {

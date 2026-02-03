@@ -2,15 +2,11 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copy root package files and dashboard
-COPY package.json package-lock.json ./
-COPY dashboard/package.json ./dashboard/
-COPY src/database/schema.ts ./src/database/
+# Copy dashboard
 COPY dashboard ./dashboard
-
-# Install deps: root (for schema resolution) + dashboard
-RUN npm ci
 WORKDIR /app/dashboard
+
+# Install deps
 RUN npm install
 
 # Build Next.js (needs DATABASE_URL for server-side, use dummy for build)

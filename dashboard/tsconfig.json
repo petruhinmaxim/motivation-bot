@@ -18,10 +18,9 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"],
-      "@motivation-bot/schema": ["../src/database/schema"]
+      "@/*": ["./src/*"]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "../src/database/schema.ts"],
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
   "exclude": ["node_modules"]
 }
