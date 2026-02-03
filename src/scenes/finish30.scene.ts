@@ -72,11 +72,13 @@ export async function handleFinish30Scene(ctx: Context) {
         InputMediaBuilder.photo(new InputFile(photo2Path)),
       ];
       const messages = await ctx.api.sendMediaGroup(chatId, media);
-      if (messages[0]?.photo?.length) {
-        await redis.set(FINISH30_PHOTO1_FILE_ID_KEY, messages[0].photo[messages[0].photo.length - 1].file_id);
+      const msg0 = messages[0];
+      const msg1 = messages[1];
+      if (msg0 && 'photo' in msg0 && msg0.photo?.length) {
+        await redis.set(FINISH30_PHOTO1_FILE_ID_KEY, msg0.photo[msg0.photo.length - 1].file_id);
       }
-      if (messages[1]?.photo?.length) {
-        await redis.set(FINISH30_PHOTO2_FILE_ID_KEY, messages[1].photo[messages[1].photo.length - 1].file_id);
+      if (msg1 && 'photo' in msg1 && msg1.photo?.length) {
+        await redis.set(FINISH30_PHOTO2_FILE_ID_KEY, msg1.photo[msg1.photo.length - 1].file_id);
       }
     }
 
