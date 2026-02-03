@@ -55,6 +55,22 @@ services:
     networks:
       - motivation_bot_network
 
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    container_name: motivation_bot_dashboard
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-motivation_bot}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - motivation_bot_network
+
 volumes:
   postgres_data:
   redis_data:

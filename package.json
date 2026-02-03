@@ -16,7 +16,10 @@
     "docker:build": "docker build -t motivation-bot:latest .",
     "docker:up": "docker compose -f docker-compose.prod.yml up -d",
     "docker:down": "docker compose -f docker-compose.prod.yml down",
-    "docker:logs": "docker compose -f docker-compose.prod.yml logs -f bot"
+    "docker:logs": "docker compose -f docker-compose.prod.yml logs -f bot",
+    "dashboard:dev": "cd dashboard && npm run dev",
+    "dashboard:build": "cd dashboard && npm run build",
+    "dashboard:start": "cd dashboard && npm run start"
   },
   "keywords": [
     "telegram",

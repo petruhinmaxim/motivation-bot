@@ -85,7 +85,11 @@ docker compose -f docker-compose.prod.yml ps
 docker compose -f docker-compose.prod.yml logs -f bot
 ```
 
-4. **Проверьте работу бота:**
+4. **Дашборд** доступен по адресу `http://<ваш-сервер>:3000`:
+   - Логин: `toha`
+   - Пароль: `krasava`
+
+5. **Проверьте работу бота:**
 
 ```bash
 # Проверьте логи на наличие ошибок
