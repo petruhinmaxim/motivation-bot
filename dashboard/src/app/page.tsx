@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import {
   LineChart,
   Line,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -27,6 +29,11 @@ type TimelinePoint = {
   newUsers: number;
   blocked: number;
   activeChallengeUsers: number;
+};
+
+type ButtonClicksPoint = {
+  date: string;
+  buttonClicks: number;
 };
 
 type User = {
@@ -88,6 +95,7 @@ async function fetchJson(url: string) {
 export default function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [timeline, setTimeline] = useState<TimelinePoint[]>([]);
+  const [buttonClicks, setButtonClicks] = useState<ButtonClicksPoint[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [feedback, setFeedback] = useState<Feedback[]>([]);
@@ -101,15 +109,17 @@ export default function DashboardPage() {
   useEffect(() => {
     async function load() {
       try {
-        const [s, t, u, c, f] = await Promise.all([
+        const [s, t, b, u, c, f] = await Promise.all([
           fetchJson("/api/stats"),
           fetchJson("/api/stats/timeline?days=30"),
+          fetchJson("/api/stats/buttons?days=30"),
           fetchJson("/api/users"),
           fetchJson("/api/challenges"),
           fetchJson("/api/feedback?limit=20"),
         ]);
         setStats(s);
         setTimeline(t);
+        setButtonClicks(b);
         setUsers(u);
         setChallenges(c);
         setFeedback(f);
@@ -242,6 +252,49 @@ export default function DashboardPage() {
                     dot={false}
                   />
                 </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+
+          <section>
+            <h2 className="text-lg font-semibold mb-4">Нажатия кнопок за 30 дней</h2>
+            <div className="rounded-xl bg-slate-800/30 border border-slate-700 p-4 h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={buttonClicks}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis
+                    dataKey="date"
+                    tickFormatter={(v) =>
+                      new Date(v).toLocaleDateString("ru", {
+                        day: "numeric",
+                        month: "short",
+                      })
+                    }
+                    stroke="#94a3b8"
+                    fontSize={12}
+                  />
+                  <YAxis stroke="#94a3b8" fontSize={12} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#1e293b",
+                      border: "1px solid #475569",
+                      borderRadius: "8px",
+                    }}
+                    labelFormatter={(v) =>
+                      new Date(v).toLocaleDateString("ru", {
+                        day: "numeric",
+                        month: "long",
+                        year: "numeric",
+                      })
+                    }
+                  />
+                  <Bar
+                    dataKey="buttonClicks"
+                    name="Нажатий"
+                    fill="#a855f7"
+                    radius={[4, 4, 0, 0]}
+                  />
+                </BarChart>
               </ResponsiveContainer>
             </div>
           </section>
