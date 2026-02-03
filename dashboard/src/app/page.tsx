@@ -96,6 +96,7 @@ export default function DashboardPage() {
   const [tab, setTab] = useState<"overview" | "users" | "challenges" | "feedback">(
     "overview"
   );
+  const [activeChallengesOnly, setActiveChallengesOnly] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -103,8 +104,8 @@ export default function DashboardPage() {
         const [s, t, u, c, f] = await Promise.all([
           fetchJson("/api/stats"),
           fetchJson("/api/stats/timeline?days=30"),
-          fetchJson("/api/users?limit=20"),
-          fetchJson("/api/challenges?limit=20"),
+          fetchJson("/api/users"),
+          fetchJson("/api/challenges"),
           fetchJson("/api/feedback?limit=20"),
         ]);
         setStats(s);
@@ -248,19 +249,20 @@ export default function DashboardPage() {
       )}
 
       {tab === "users" && (
-        <div className="overflow-x-auto rounded-xl border border-slate-700">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-slate-800/50 border-b border-slate-700">
-                <th className="text-left p-3">ID</th>
-                <th className="text-left p-3">Имя</th>
-                <th className="text-left p-3">Username</th>
-                <th className="text-left p-3">Заблокирован</th>
-                <th className="text-left p-3">Создан</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => (
+        <div>
+          <div className="overflow-x-auto rounded-xl border border-slate-700">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-800/50 border-b border-slate-700">
+                  <th className="text-left p-3">ID</th>
+                  <th className="text-left p-3">Имя</th>
+                  <th className="text-left p-3">Username</th>
+                  <th className="text-left p-3">Заблокирован</th>
+                  <th className="text-left p-3">Создан</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u) => (
                 <tr
                   key={u.id}
                   className="border-b border-slate-800 hover:bg-slate-800/30"
@@ -282,18 +284,31 @@ export default function DashboardPage() {
                   </td>
                 </tr>
               ))}
-            </tbody>
-          </table>
-          <p className="p-3 text-slate-500 text-xs">
-            Показано 20 последних записей
-          </p>
+              </tbody>
+            </table>
+            <p className="p-3 text-slate-500 text-xs">
+              Всего: {users.length} записей
+            </p>
+          </div>
         </div>
       )}
 
       {tab === "challenges" && (
-        <div className="overflow-x-auto rounded-xl border border-slate-700">
-          <table className="w-full text-sm">
-            <thead>
+        <div>
+          <div className="flex items-center gap-4 mb-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={activeChallengesOnly}
+                onChange={(e) => setActiveChallengesOnly(e.target.checked)}
+                className="rounded border-slate-600 bg-slate-800 text-green-500 focus:ring-green-500"
+              />
+              <span className="text-sm text-slate-300">Только активные челленджи</span>
+            </label>
+          </div>
+          <div className="overflow-x-auto rounded-xl border border-slate-700">
+            <table className="w-full text-sm">
+              <thead>
               <tr className="bg-slate-800/50 border-b border-slate-700">
                 <th className="text-left p-3">ID</th>
                 <th className="text-left p-3">Пользователь</th>
@@ -304,7 +319,10 @@ export default function DashboardPage() {
               </tr>
             </thead>
             <tbody>
-              {challenges.map((c) => (
+              {(activeChallengesOnly
+                ? challenges.filter((c) => c.status === "active")
+                : challenges
+              ).map((c) => (
                 <tr
                   key={c.id}
                   className="border-b border-slate-800 hover:bg-slate-800/30"
@@ -340,11 +358,14 @@ export default function DashboardPage() {
                   </td>
                 </tr>
               ))}
-            </tbody>
-          </table>
-          <p className="p-3 text-slate-500 text-xs">
-            Показано 20 последних записей
-          </p>
+              </tbody>
+            </table>
+            <p className="p-3 text-slate-500 text-xs">
+              {activeChallengesOnly
+                ? `Показано ${challenges.filter((c) => c.status === "active").length} из ${challenges.length} записей`
+                : `Всего: ${challenges.length} записей`}
+            </p>
+          </div>
         </div>
       )}
 

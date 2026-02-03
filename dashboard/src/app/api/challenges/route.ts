@@ -6,13 +6,14 @@ import { desc, eq, sql } from 'drizzle-orm';
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10), 100);
+    const limitParam = searchParams.get('limit');
+    const limit = limitParam ? Math.min(parseInt(limitParam, 10), 10000) : undefined;
     const offset = parseInt(searchParams.get('offset') ?? '0', 10);
     const status = searchParams.get('status');
 
     const whereClause = status ? eq(challenges.status, status) : sql`1=1`;
 
-    const list = await db
+    let query = db
       .select({
         id: challenges.id,
         userId: challenges.userId,
@@ -33,8 +34,13 @@ export async function GET(request: NextRequest) {
       .innerJoin(users, eq(challenges.userId, users.id))
       .where(whereClause)
       .orderBy(desc(challenges.createdAt))
-      .limit(limit)
       .offset(offset);
+
+    if (limit !== undefined) {
+      query = query.limit(limit) as typeof query;
+    }
+
+    const list = await query;
 
     return NextResponse.json(list);
   } catch (error) {
