@@ -90,15 +90,15 @@ export async function handleChallengeStatsScene(ctx: Context) {
   if (ctx.callbackQuery) {
     if (isMissedDayCallback) {
       // Для missed-day уведомления отправляем отдельное сообщение
-      await ctx.reply(messageText, { reply_markup: keyboard });
+      await ctx.reply(messageText, { reply_markup: keyboard, parse_mode: 'HTML' });
     } else {
       // По умолчанию для остальных мест сохраняем поведение: редактируем сообщение
-      await ctx.editMessageText(messageText, { reply_markup: keyboard });
+      await ctx.editMessageText(messageText, { reply_markup: keyboard, parse_mode: 'HTML' });
     }
     await ctx.answerCallbackQuery();
     return;
   }
 
   // Если это новое сообщение, отправляем новое
-  await ctx.reply(messageText, { reply_markup: keyboard });
+  await ctx.reply(messageText, { reply_markup: keyboard, parse_mode: 'HTML' });
 }

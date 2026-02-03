@@ -158,10 +158,10 @@ export const MESSAGE_FUNCTIONS = {
         timezoneText = ` (${sign}${diffFromMsk} МСК)`;
       }
     }
-    
+
     return `📊 Статистика челленджа Jiroboy\n\n` +
       ` Дата начала челленджа: ${startDate}\n` +
-      ` Количество дней: ${successfulDays} / ${duration}\n` +
+      ` Количество дней: <b>${successfulDays} / ${duration}</b>\n` +
       ` Пропущено дней подряд: ${daysWithoutWorkout}\n` +
       ` Время уведомлений: ${reminderTime}${timezoneText}                    `;
   },
