@@ -1,6 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
 
 type Stats = {
   users: { total: number; active: number; blocked: number };
@@ -10,8 +20,13 @@ type Stats = {
     completed: number;
     failed: number;
   };
-  feedback: { total: number };
-  byDuration: Record<number, number>;
+};
+
+type TimelinePoint = {
+  date: string;
+  newUsers: number;
+  blocked: number;
+  activeChallengeUsers: number;
 };
 
 type User = {
@@ -72,6 +87,7 @@ async function fetchJson(url: string) {
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null);
+  const [timeline, setTimeline] = useState<TimelinePoint[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [feedback, setFeedback] = useState<Feedback[]>([]);
@@ -84,13 +100,15 @@ export default function DashboardPage() {
   useEffect(() => {
     async function load() {
       try {
-        const [s, u, c, f] = await Promise.all([
+        const [s, t, u, c, f] = await Promise.all([
           fetchJson("/api/stats"),
+          fetchJson("/api/stats/timeline?days=30"),
           fetchJson("/api/users?limit=20"),
           fetchJson("/api/challenges?limit=20"),
           fetchJson("/api/feedback?limit=20"),
         ]);
         setStats(s);
+        setTimeline(t);
         setUsers(u);
         setChallenges(c);
         setFeedback(f);
@@ -163,22 +181,68 @@ export default function DashboardPage() {
               <StatCard title="Завершено" value={stats.challenges.completed} />
               <StatCard title="Провалено" value={stats.challenges.failed} />
             </div>
-            {Object.keys(stats.byDuration).length > 0 && (
-              <div className="mt-4 grid grid-cols-3 gap-4">
-                {Object.entries(stats.byDuration).map(([dur, cnt]) => (
-                  <StatCard
-                    key={dur}
-                    title={`Длительность ${dur} дней`}
-                    value={cnt}
-                  />
-                ))}
-              </div>
-            )}
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold mb-4">Обратная связь</h2>
-            <StatCard title="Всего отзывов" value={stats.feedback.total} />
+            <h2 className="text-lg font-semibold mb-4">Динамика за 30 дней</h2>
+            <div className="rounded-xl bg-slate-800/30 border border-slate-700 p-4 h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={timeline}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis
+                    dataKey="date"
+                    tickFormatter={(v) =>
+                      new Date(v).toLocaleDateString("ru", {
+                        day: "numeric",
+                        month: "short",
+                      })
+                    }
+                    stroke="#94a3b8"
+                    fontSize={12}
+                  />
+                  <YAxis stroke="#94a3b8" fontSize={12} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#1e293b",
+                      border: "1px solid #475569",
+                      borderRadius: "8px",
+                    }}
+                    labelFormatter={(v) =>
+                      new Date(v).toLocaleDateString("ru", {
+                        day: "numeric",
+                        month: "long",
+                        year: "numeric",
+                      })
+                    }
+                  />
+                  <Legend />
+                  <Line
+                    type="monotone"
+                    dataKey="newUsers"
+                    name="Новые пользователи"
+                    stroke="#22c55e"
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="blocked"
+                    name="Заблокировали"
+                    stroke="#ef4444"
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="activeChallengeUsers"
+                    name="С активным челленджем"
+                    stroke="#3b82f6"
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
           </section>
         </div>
       )}
