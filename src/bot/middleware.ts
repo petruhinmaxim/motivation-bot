@@ -27,7 +27,7 @@ import {
 import { missedWorkoutReportService } from '../services/missed-workout-report.service.js';
 import { feedbackService } from '../services/feedback.service.js';
 import { buttonLogService } from '../services/button-log.service.js';
-import { MESSAGES, BUTTONS } from '../scenes/messages.js';
+import { MESSAGES, BUTTONS, MESSAGE_FUNCTIONS } from '../scenes/messages.js';
 import { schedulerService } from '../services/scheduler.service.js';
 import { notificationService } from '../services/notification.service.js';
 import { validateTime } from '../utils/time-validator.js';
@@ -115,7 +115,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
       const textToSend = lines.slice(1).join('\n').trim();
       
       if (!textToSend) {
-        await ctx.reply('Пожалуйста, укажите текст для отправки после команды sendAllUsers');
+        await ctx.reply(MESSAGES.ADMIN.SEND_ALL_USERS_EMPTY);
         return;
       }
 
@@ -150,14 +150,12 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         }
 
         // Отправляем подтверждение отправителю
-        await ctx.reply(
-          `✅ Сообщение отправлено ${successCount} пользователям${errorCount > 0 ? ` (ошибок: ${errorCount})` : ''}`
-        );
+        await ctx.reply(MESSAGE_FUNCTIONS.SEND_ALL_USERS_SUCCESS(successCount, errorCount));
         
         logger.info(`User ${userId} sent message to all users. Success: ${successCount}, Errors: ${errorCount}`);
       } catch (error) {
         logger.error(`Error sending message to all users:`, error);
-        await ctx.reply('Произошла ошибка при отправке сообщения всем пользователям');
+        await ctx.reply(MESSAGES.ADMIN.SEND_ALL_USERS_ERROR);
       }
       
       return;
@@ -465,7 +463,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           await handleStartScene(ctx);
         } catch (error: any) {
           logger.error(`Error starting new challenge for user ${userId}:`, error);
-          await ctx.answerCallbackQuery('Произошла ошибка. Попробуйте позже.');
+          await ctx.answerCallbackQuery(MESSAGES.ERROR.TEXT);
         }
         return;
       }
@@ -573,7 +571,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           notificationService.cancelDailyReminder(userId);
           notificationService.cancelMissedDayNotification(userId);
           await ctx.answerCallbackQuery();
-          await ctx.reply('Челлендж завершен. Ты в любой момент можешь запустить новый.');
+          await ctx.reply(MESSAGES.CHALLENGE.COMPLETED);
           await stateService.sendEvent(userId, { type: 'GO_TO_START' });
           const mockContext = {
             from: ctx.from,
@@ -584,7 +582,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           await handleStartScene(mockContext);
         } catch (error: any) {
           logger.error(`Error finishing challenge for user ${userId}:`, error);
-          await ctx.answerCallbackQuery('Произошла ошибка. Попробуйте позже.');
+          await ctx.answerCallbackQuery(MESSAGES.ERROR.TEXT);
         }
         return;
       }
@@ -874,7 +872,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
           clearTimeout(timeoutId);
           if (fetchError.name === 'AbortError') {
             logger.error(`Timeout downloading image for user ${userId}`);
-            await ctx.reply('Превышено время ожидания загрузки изображения. Пожалуйста, попробуйте еще раз.');
+            await ctx.reply(MESSAGES.PHOTO.UPLOAD_TIMEOUT);
           } else {
             throw fetchError;
           }
@@ -887,7 +885,7 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         
         // Более информативное сообщение об ошибке
         if (error.message?.includes('timeout') || error.message?.includes('Timeout')) {
-          await ctx.reply('Превышено время ожидания обработки изображения. Пожалуйста, попробуйте еще раз.');
+          await ctx.reply(MESSAGES.PHOTO.PROCESS_TIMEOUT);
         } else {
           await ctx.reply(MESSAGES.PHOTO.PROCESS_ERROR);
         }
@@ -1082,9 +1080,9 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
             
             // Более информативное сообщение об ошибке валидации
             if (error.message && error.message.includes('exceeds maximum length')) {
-              await ctx.reply('Текст слишком длинный. Пожалуйста, отправьте более короткое сообщение.');
+              await ctx.reply(MESSAGES.VALIDATION.TEXT_TOO_LONG);
             } else if (error.message && error.message.includes('cannot be empty')) {
-              await ctx.reply('Сообщение не может быть пустым.');
+              await ctx.reply(MESSAGES.VALIDATION.TEXT_EMPTY);
             } else {
               await ctx.reply(MESSAGES.REPORT.SAVE_ERROR);
             }
