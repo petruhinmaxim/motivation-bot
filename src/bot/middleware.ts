@@ -22,6 +22,7 @@ import {
   handleEditReminderTimeScene,
   handleFeedbackScene,
   handleStartNewChallengeConfirmScene,
+  handleFinish30Scene,
 } from '../scenes/index.js';
 import { missedWorkoutReportService } from '../services/missed-workout-report.service.js';
 import { feedbackService } from '../services/feedback.service.js';
@@ -546,6 +547,53 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         await handleFeedbackScene(ctx);
         return;
       }
+
+      // Кнопки завершающей сцены
+      if (data === 'extend_challenge_50') {
+        await ctx.answerCallbackQuery('Скоро будет доступно');
+        return;
+      }
+      if (data === 'extend_challenge_100') {
+        await ctx.answerCallbackQuery('Скоро будет доступно');
+        return;
+      }
+      if (data === 'finish_challenge') {
+        await ctx.answerCallbackQuery();
+        const confirmKeyboard = new InlineKeyboard()
+          .text(BUTTONS.NO, 'finish_challenge_cancel')
+          .text(BUTTONS.YES, 'finish_challenge_confirm');
+        await ctx.reply(MESSAGES.FINISH_CHALLENGE_CONFIRM.TEXT, {
+          reply_markup: confirmKeyboard,
+        });
+        return;
+      }
+      if (data === 'finish_challenge_confirm') {
+        try {
+          await challengeService.completeChallenge(userId);
+          notificationService.cancelDailyReminder(userId);
+          notificationService.cancelMissedDayNotification(userId);
+          await ctx.answerCallbackQuery();
+          await ctx.reply('Челлендж завершен. Ты в любой момент можешь запустить новый.');
+          await stateService.sendEvent(userId, { type: 'GO_TO_START' });
+          const mockContext = {
+            from: ctx.from,
+            chat: ctx.chat,
+            api: ctx.api,
+            reply: ctx.reply.bind(ctx),
+          } as any;
+          await handleStartScene(mockContext);
+        } catch (error: any) {
+          logger.error(`Error finishing challenge for user ${userId}:`, error);
+          await ctx.answerCallbackQuery('Произошла ошибка. Попробуйте позже.');
+        }
+        return;
+      }
+      if (data === 'finish_challenge_cancel') {
+        await ctx.answerCallbackQuery();
+        await stateService.sendEvent(userId, { type: 'GO_TO_FINISH30' });
+        await handleFinish30Scene(ctx);
+        return;
+      }
     }
 
     // Обрабатываем текстовые сообщения в зависимости от текущей сцены
@@ -812,11 +860,16 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
             caption: getRandomMotivationalPhrase(),
           });
 
-          // Возвращаем пользователя в сцену статистики
-          await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
-          
-          // Отправляем сцену статистики
-          await handleChallengeStatsScene(ctx);
+          // Проверяем, завершён ли челлендж (30 из 30 дней) — показываем финишную сцену
+          // Статус челленджа переводится в completed только при нажатии "Завершить челлендж"
+          if (wasIncremented && updatedChallenge.successfulDays >= updatedChallenge.duration) {
+            await stateService.sendEvent(userId, { type: 'GO_TO_FINISH30' });
+            await handleFinish30Scene(ctx);
+          } else {
+            // Возвращаем пользователя в сцену статистики
+            await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
+            await handleChallengeStatsScene(ctx);
+          }
         } catch (fetchError: any) {
           clearTimeout(timeoutId);
           if (fetchError.name === 'AbortError') {

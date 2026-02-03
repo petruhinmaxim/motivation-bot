@@ -22,6 +22,7 @@ export const botMachine = setup({
       | { type: 'GO_TO_CHALLENGE_FAILED' }
       | { type: 'GO_TO_FEEDBACK' }
       | { type: 'GO_TO_START_NEW_CHALLENGE_CONFIRM' }
+      | { type: 'GO_TO_FINISH30' }
       | { type: 'GO_BACK' },
   },
 }).createMachine({
@@ -274,6 +275,9 @@ export const botMachine = setup({
         GO_TO_CHALLENGE_STATS: {
           target: 'challenge_stats',
         },
+        GO_TO_FINISH30: {
+          target: 'finish30',
+        },
         GO_TO_START: {
           target: 'start',
         },
@@ -310,6 +314,16 @@ export const botMachine = setup({
         GO_TO_CHALLENGE_STATS: {
           target: 'challenge_stats',
         },
+        GO_TO_START: {
+          target: 'start',
+        },
+      },
+    },
+    finish30: {
+      entry: ({ context }) => {
+        context.scene = 'finish30';
+      },
+      on: {
         GO_TO_START: {
           target: 'start',
         },

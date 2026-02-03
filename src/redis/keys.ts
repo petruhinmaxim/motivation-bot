@@ -39,3 +39,8 @@ export const getFinalMissedDaySentKey = (userId: number, challengeId: number): s
 // Ключ для блокировки ежедневной проверки здоровья
 export const getDailyHealthCheckLockKey = (): string => 'notification:health_check:lock';
 
+// Кэш file_id медиа для finish30 (избегаем повторной загрузки)
+export const FINISH30_GIF_FILE_ID_KEY = 'finish30:gif_file_id';
+export const FINISH30_PHOTO1_FILE_ID_KEY = 'finish30:photo1_file_id';
+export const FINISH30_PHOTO2_FILE_ID_KEY = 'finish30:photo2_file_id';
+

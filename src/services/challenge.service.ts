@@ -322,6 +322,35 @@ export class ChallengeService {
   }
 
   /**
+   * Переводит активный челлендж в статус completed (успешное завершение)
+   * @param userId - ID пользователя
+   */
+  async completeChallenge(userId: number): Promise<void> {
+    try {
+      const challenge = await this.getActiveChallenge(userId);
+      if (!challenge) {
+        logger.warn(`No active challenge found for user ${userId} to complete`);
+        return;
+      }
+
+      await db
+        .update(challenges)
+        .set({
+          status: 'completed',
+          updatedAt: new Date(),
+        })
+        .where(eq(challenges.id, challenge.id));
+
+      await this.clearPhotoUploadKeys(userId);
+
+      logger.info(`Completed challenge ${challenge.id} for user ${userId}`);
+    } catch (error) {
+      logger.error(`Error completing challenge for user ${userId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Переводит активный челлендж в статус failed
    * Очищает все ключи Redis для загрузки фото
    * @param userId - ID пользователя

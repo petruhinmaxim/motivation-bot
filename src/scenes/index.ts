@@ -14,4 +14,5 @@ export * from './missed-workout-report.scene.js';
 export * from './challenge-failed.scene.js';
 export * from './feedback.scene.js';
 export * from './start-new-challenge-confirm.scene.js';
+export * from './finish30.scene.js';
 
