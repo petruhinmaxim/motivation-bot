@@ -11,7 +11,7 @@ COPY dashboard ./dashboard
 # Install deps: root (for schema resolution) + dashboard
 RUN npm ci
 WORKDIR /app/dashboard
-RUN npm ci
+RUN npm install
 
 # Build Next.js (needs DATABASE_URL for server-side, use dummy for build)
 ENV DATABASE_URL=postgresql://dummy:dummy@localhost:5432/dummy
