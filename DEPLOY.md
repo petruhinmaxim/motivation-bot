@@ -242,14 +242,18 @@ docker compose -f docker-compose.prod.yml logs bot | grep -i error
 
 ### Резервное копирование
 
-#### PostgreSQL
+#### Автоматический бэкап (рекомендуется)
+
+Используйте скрипт `scripts/backup-postgres.sh` — см. раздел [Настройка бэкапов на сервере](#настройка-бэкапов-на-сервере) ниже.
+
+#### Ручной бэкап PostgreSQL
 
 ```bash
-# Создание бэкапа
-docker compose -f docker-compose.prod.yml exec postgres pg_dump -U postgres motivation_bot > backup_$(date +%Y%m%d_%H%M%S).sql
+# Создание бэкапа (со сжатием)
+docker compose -f docker-compose.prod.yml exec postgres pg_dump -U postgres motivation_bot | gzip > backup_$(date +%Y%m%d_%H%M%S).sql.gz
 
 # Восстановление из бэкапа
-docker compose -f docker-compose.prod.yml exec -T postgres psql -U postgres motivation_bot < backup.sql
+gunzip -c backup_20250205.sql.gz | docker compose -f docker-compose.prod.yml exec -T postgres psql -U postgres motivation_bot
 ```
 
 #### Redis
@@ -258,6 +262,67 @@ docker compose -f docker-compose.prod.yml exec -T postgres psql -U postgres moti
 # Redis сохраняет данные автоматически (AOF включен)
 # Ручное сохранение
 docker compose -f docker-compose.prod.yml exec redis redis-cli --no-auth-warning -a $REDIS_PASSWORD BGSAVE
+```
+
+### Настройка бэкапов на сервере
+
+#### Шаг 1: Развернуть проект на сервере
+
+Убедитесь, что проект развёрнут и `docker compose -f docker-compose.prod.yml up -d` выполнен.
+
+#### Шаг 2: Сделать скрипт исполняемым
+
+```bash
+cd /path/to/motivation-bot   # путь к проекту на сервере
+chmod +x scripts/backup-postgres.sh
+```
+
+#### Шаг 3: Проверить ручной запуск
+
+```bash
+./scripts/backup-postgres.sh
+```
+
+Бэкап появится в `backups/postgres/` (или в `BACKUP_DIR`, если задана).
+
+#### Шаг 4: Настроить cron для ежедневного бэкапа
+
+```bash
+crontab -e
+```
+
+Добавьте строку (бэкап каждый день в 3:00):
+
+```cron
+0 3 * * * cd /path/to/motivation-bot && ./scripts/backup-postgres.sh >> /var/log/postgres-backup.log 2>&1
+```
+
+Замените `/path/to/motivation-bot` на реальный путь (например `/opt/motivation-bot` или `/home/user/motivation-bot`).
+
+#### Шаг 5 (опционально): Кастомные настройки
+
+| Переменная | По умолчанию | Описание |
+|------------|--------------|----------|
+| `BACKUP_DIR` | `./backups/postgres` | Папка для бэкапов |
+| `RETENTION_DAYS` | `7` | Хранить бэкапы N дней |
+| `COMPOSE_FILE` | `docker-compose.prod.yml` | Файл compose |
+
+Пример:
+
+```bash
+BACKUP_DIR=/opt/backups RETENTION_DAYS=14 ./scripts/backup-postgres.sh
+```
+
+В cron:
+
+```cron
+0 3 * * * cd /opt/motivation-bot && BACKUP_DIR=/opt/backups RETENTION_DAYS=14 ./scripts/backup-postgres.sh >> /var/log/postgres-backup.log 2>&1
+```
+
+#### Восстановление из бэкапа
+
+```bash
+gunzip -c backups/postgres/backup_20250205_030000.sql.gz | docker compose -f docker-compose.prod.yml exec -T postgres psql -U postgres motivation_bot
 ```
 
 ## Решение проблем
