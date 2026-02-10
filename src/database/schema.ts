@@ -24,7 +24,7 @@ export const challenges = pgTable('challenges', {
   restartCount: integer('restart_count').notNull().default(0),
   daysWithoutWorkout: integer('days_without_workout').notNull().default(0),
   successfulDays: integer('successful_days').notNull().default(0),
-  duration: integer('duration').notNull(), // 30, 60, or 90 days
+  duration: integer('duration').notNull(), // 30, 50, or 100 days
   reminderStatus: boolean('reminder_status').notNull().default(false),
   reminderTime: time('reminder_time'),
   createdAt: timestamp('created_at').defaultNow().notNull(),

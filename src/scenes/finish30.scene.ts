@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { BUTTONS, MESSAGES } from './messages.js';
 import redis from '../redis/client.js';
 import { FINISH30_GIF_FILE_ID_KEY } from '../redis/keys.js';
+import { challengeService } from '../services/challenge.service.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -22,12 +23,17 @@ export async function handleFinish30Scene(ctx: Context) {
 
   if (!chatId) return;
 
-  const keyboard = new InlineKeyboard()
-    .text(BUTTONS.EXTEND_CHALLENGE_50, 'extend_challenge_50')
-    .row()
-    .text(BUTTONS.EXTEND_CHALLENGE_100, 'extend_challenge_100')
-    .row()
-    .text(BUTTONS.FINISH_CHALLENGE, 'finish_challenge');
+  const challenge = await challengeService.getActiveChallenge(userId);
+  const duration = challenge?.duration ?? 30;
+
+  const keyboard = new InlineKeyboard();
+  if (duration < 50) {
+    keyboard.text(BUTTONS.EXTEND_CHALLENGE_50, 'extend_challenge_50').row();
+  }
+  if (duration < 100) {
+    keyboard.text(BUTTONS.EXTEND_CHALLENGE_100, 'extend_challenge_100').row();
+  }
+  keyboard.text(BUTTONS.FINISH_CHALLENGE, 'finish_challenge');
 
   const messageOptions = {
     parse_mode: 'HTML' as const,

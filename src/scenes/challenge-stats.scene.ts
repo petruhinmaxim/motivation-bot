@@ -5,13 +5,19 @@ import { challengeService } from '../services/challenge.service.js';
 import { userService } from '../services/user.service.js';
 import { notificationService } from '../services/notification.service.js';
 
-export async function handleChallengeStatsScene(ctx: Context) {
+export type ChallengeStatsSceneOptions = {
+  /** Отправить статистику новым сообщением вместо редактирования (например, после продления челленджа) */
+  sendAsNewMessage?: boolean;
+};
+
+export async function handleChallengeStatsScene(ctx: Context, options?: ChallengeStatsSceneOptions) {
   const userId = ctx.from?.id;
   if (!userId) return;
 
   // Если кнопка нажата из missed-day уведомления, НЕ редактируем исходное сообщение,
   // а отправляем статистику отдельным сообщением (исходное сообщение часто фото)
   const isMissedDayCallback = ctx.callbackQuery?.data === 'challenge_stats_missed_day';
+  const sendAsNewMessage = options?.sendAsNewMessage ?? false;
 
   // Получаем данные челленджа из базы
   const challenge = await challengeService.getActiveChallenge(userId);
@@ -88,11 +94,11 @@ export async function handleChallengeStatsScene(ctx: Context) {
     .text(BUTTONS.SEND_PHOTO, 'send_photo');
 
   if (ctx.callbackQuery) {
-    if (isMissedDayCallback) {
-      // Для missed-day уведомления отправляем отдельное сообщение
+    if (isMissedDayCallback || sendAsNewMessage) {
+      // Отправляем отдельным сообщением (missed-day или после продления челленджа)
       await ctx.reply(messageText, { reply_markup: keyboard, parse_mode: 'HTML' });
     } else {
-      // По умолчанию для остальных мест сохраняем поведение: редактируем сообщение
+      // По умолчанию редактируем сообщение
       await ctx.editMessageText(messageText, { reply_markup: keyboard, parse_mode: 'HTML' });
     }
     await ctx.answerCallbackQuery();

@@ -351,6 +351,50 @@ export class ChallengeService {
   }
 
   /**
+   * Продлевает активный челлендж до 50 или 100 дней.
+   * Разрешает только увеличение: до 50 только при текущих 30 днях, до 100 — при 30 или 50.
+   * @param userId - ID пользователя
+   * @param newDuration - 50 или 100
+   * @returns Обновлённый челлендж или null при ошибке/невалидном переходе
+   */
+  async extendChallenge(
+    userId: number,
+    newDuration: 50 | 100
+  ): Promise<typeof challenges.$inferSelect | null> {
+    try {
+      const challenge = await this.getActiveChallenge(userId);
+      if (!challenge) {
+        logger.warn(`No active challenge found for user ${userId} to extend`);
+        return null;
+      }
+
+      const current = challenge.duration;
+      if (newDuration === 50 && current !== 30) {
+        logger.warn(`Cannot extend to 50 for user ${userId}: current duration is ${current}`);
+        return null;
+      }
+      if (newDuration === 100 && current >= 100) {
+        logger.warn(`Cannot extend to 100 for user ${userId}: current duration is ${current}`);
+        return null;
+      }
+
+      await db
+        .update(challenges)
+        .set({
+          duration: newDuration,
+          updatedAt: new Date(),
+        })
+        .where(eq(challenges.id, challenge.id));
+
+      logger.info(`Extended challenge ${challenge.id} for user ${userId} to ${newDuration} days`);
+      return { ...challenge, duration: newDuration, updatedAt: new Date() };
+    } catch (error) {
+      logger.error(`Error extending challenge for user ${userId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Переводит активный челлендж в статус failed
    * Очищает все ключи Redis для загрузки фото
    * @param userId - ID пользователя

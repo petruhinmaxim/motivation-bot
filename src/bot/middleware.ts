@@ -546,13 +546,39 @@ export async function stateMiddleware(ctx: Context, next: NextFunction) {
         return;
       }
 
-      // Кнопки завершающей сцены
+      // Кнопки завершающей сцены — продление челленджа
       if (data === 'extend_challenge_50') {
-        await ctx.answerCallbackQuery('Скоро будет доступно');
+        await ctx.answerCallbackQuery();
+        try {
+          const updated = await challengeService.extendChallenge(userId, 50);
+          if (updated) {
+            await ctx.reply(MESSAGES.CHALLENGE.EXTENDED_TO_50);
+            await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
+            await handleChallengeStatsScene(ctx, { sendAsNewMessage: true });
+          } else {
+            await ctx.reply(MESSAGES.CHALLENGE.EXTEND_NOT_AVAILABLE);
+          }
+        } catch (err) {
+          logger.error(`Error extending challenge to 50 for user ${userId}:`, err);
+          await ctx.reply(MESSAGES.ERROR.TEXT);
+        }
         return;
       }
       if (data === 'extend_challenge_100') {
-        await ctx.answerCallbackQuery('Скоро будет доступно');
+        await ctx.answerCallbackQuery();
+        try {
+          const updated = await challengeService.extendChallenge(userId, 100);
+          if (updated) {
+            await ctx.reply(MESSAGES.CHALLENGE.EXTENDED_TO_100);
+            await stateService.sendEvent(userId, { type: 'GO_TO_CHALLENGE_STATS' });
+            await handleChallengeStatsScene(ctx, { sendAsNewMessage: true });
+          } else {
+            await ctx.reply(MESSAGES.CHALLENGE.EXTEND_NOT_AVAILABLE);
+          }
+        } catch (err) {
+          logger.error(`Error extending challenge to 100 for user ${userId}:`, err);
+          await ctx.reply(MESSAGES.ERROR.TEXT);
+        }
         return;
       }
       if (data === 'finish_challenge') {
