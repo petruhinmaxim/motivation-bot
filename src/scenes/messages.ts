@@ -22,6 +22,7 @@ export const BUTTONS = {
   DISABLE_REMINDERS: '🔕 Отключить уведомления',
   ENABLE_REMINDERS: '🔔 Включить уведомления',
   FEEDBACK: '💬 Обратная связь',
+  START_WEBAPP: 'Старт Webapp',
 } as const;
 
 // Тексты сообщений для сцен

@@ -6,6 +6,8 @@ import logger from './utils/logger.js';
 import { notificationService } from './services/notification.service.js';
 import { schedulerService } from './services/scheduler.service.js';
 import { closeRedis } from './redis/client.js';
+import { env } from './utils/env.js';
+import { startWebAppServer, stopWebAppServer } from './webapp/server.js';
 
 dotenv.config();
 
@@ -31,6 +33,10 @@ async function shutdown(signal: string): Promise<void> {
     await bot.stop();
     logger.info('Bot stopped');
 
+    logger.info('Stopping WebApp server...');
+    await stopWebAppServer();
+    logger.info('WebApp server stopped');
+
     // Закрываем соединения с БД и Redis
     logger.info('Closing database connections...');
     await Promise.all([
@@ -51,6 +57,13 @@ async function shutdown(signal: string): Promise<void> {
 
 async function start() {
   try {
+    startWebAppServer(env.WEBAPP_PORT);
+    if (env.WEBAPP_URL) {
+      logger.info(`WebApp public URL: ${env.WEBAPP_URL}`);
+    } else {
+      logger.warn('WEBAPP_URL is not set. The Start Webapp button is hidden until an https URL is configured.');
+    }
+
     // Запускаем миграции
     logger.info('Running database migrations...');
     await migrate(db, { migrationsFolder: './src/database/migrations' });

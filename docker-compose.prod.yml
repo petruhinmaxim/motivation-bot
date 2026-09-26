@@ -46,6 +46,10 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      WEBAPP_PORT: ${WEBAPP_PORT:-3002}
+      WEBAPP_URL: ${WEBAPP_URL:-}
+    ports:
+      - "${WEBAPP_PORT:-3002}:${WEBAPP_PORT:-3002}"
     depends_on:
       postgres:
         condition: service_healthy

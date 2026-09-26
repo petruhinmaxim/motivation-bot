@@ -4,6 +4,7 @@ import { BUTTONS, MESSAGES, MESSAGE_FUNCTIONS } from './messages.js';
 import { challengeService } from '../services/challenge.service.js';
 import { userService } from '../services/user.service.js';
 import { notificationService } from '../services/notification.service.js';
+import { withStartWebAppButton } from '../webapp/button.js';
 
 export type ChallengeStatsSceneOptions = {
   /** Отправить статистику новым сообщением вместо редактирования (например, после продления челленджа) */
@@ -84,14 +85,16 @@ export async function handleChallengeStatsScene(ctx: Context, options?: Challeng
     timezone
   );
 
-  const keyboard = new InlineKeyboard()
-    .text(BUTTONS.CHALLENGE_RULES, 'challenge_rules')
-    .text(BUTTONS.INFO, 'info')
-    .row()
-    .text(BUTTONS.CHALLENGE_SETTINGS, 'challenge_settings')
-    .text(BUTTONS.FEEDBACK, 'feedback')
-    .row()
-    .text(BUTTONS.SEND_PHOTO, 'send_photo');
+  const keyboard = withStartWebAppButton(
+    new InlineKeyboard()
+      .text(BUTTONS.CHALLENGE_RULES, 'challenge_rules')
+      .text(BUTTONS.INFO, 'info')
+      .row()
+      .text(BUTTONS.CHALLENGE_SETTINGS, 'challenge_settings')
+      .text(BUTTONS.FEEDBACK, 'feedback')
+      .row()
+      .text(BUTTONS.SEND_PHOTO, 'send_photo'),
+  );
 
   if (ctx.callbackQuery) {
     if (isMissedDayCallback || sendAsNewMessage) {

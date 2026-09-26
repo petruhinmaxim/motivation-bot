@@ -37,6 +37,9 @@ COPY --from=builder /app/src/database/migrations ./src/database/migrations
 # Копируем assets (шрифты и изображения)
 COPY --from=builder /app/assets ./assets
 
+# Статика Telegram WebApp
+COPY --from=builder /app/webapp ./webapp
+
 # Копируем конфигурационные файлы
 COPY --from=builder /app/drizzle.config.ts ./
 COPY --from=builder /app/tsconfig.json ./
@@ -51,8 +54,8 @@ RUN chown -R nodejs:nodejs /app
 # Переключаемся на непривилегированного пользователя
 USER nodejs
 
-# Открываем порт (если нужно для healthcheck)
-EXPOSE 3000
+# Порт Telegram WebApp
+EXPOSE 3002
 
 # Команда запуска
 CMD ["node", "dist/index.js"]

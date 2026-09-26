@@ -3,6 +3,13 @@ import * as dotenv from 'dotenv';
 
 dotenv.config();
 
+const httpsUrl = z
+  .string()
+  .url()
+  .refine((value) => value.startsWith('https://'), {
+    message: 'WEBAPP_URL must be an https URL',
+  });
+
 const envSchema = z.object({
   BOT_TOKEN: z.string().min(1, 'BOT_TOKEN is required'),
   DATABASE_URL: z.string().url('DATABASE_URL must be a valid URL'),
@@ -10,6 +17,11 @@ const envSchema = z.object({
   REDIS_PORT: z.coerce.number().default(6379),
   REDIS_PASSWORD: z.string().optional(),
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
+  WEBAPP_PORT: z.coerce.number().int().positive().default(3002),
+  WEBAPP_URL: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    httpsUrl.optional(),
+  ),
 });
 
 export type Env = z.infer<typeof envSchema>;

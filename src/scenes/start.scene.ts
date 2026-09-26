@@ -2,10 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import type { Context } from 'grammy';
 import { BUTTONS, MESSAGES } from './messages.js';
 import { challengeService } from '../services/challenge.service.js';
-
-export const startKeyboard = new InlineKeyboard()
-  .text(BUTTONS.INFO, 'info')
-  .text(BUTTONS.BEGIN, 'begin');
+import { withStartWebAppButton } from '../webapp/button.js';
 
 export async function handleStartScene(ctx: Context) {
   const userId = ctx.from?.id;
@@ -15,7 +12,7 @@ export async function handleStartScene(ctx: Context) {
   const activeChallenge = await challengeService.getActiveChallenge(userId);
   
   let messageText = MESSAGES.START.TEXT;
-  let keyboard = startKeyboard;
+  let keyboard: InlineKeyboard;
 
   // Если есть активный челлендж, добавляем текст и кнопку
   if (activeChallenge) {
@@ -24,7 +21,13 @@ export async function handleStartScene(ctx: Context) {
       .text(BUTTONS.TO_CHALLENGE, 'challenge_stats')
       .row()
       .text(BUTTONS.INFO, 'info');
+  } else {
+    keyboard = new InlineKeyboard()
+      .text(BUTTONS.INFO, 'info')
+      .text(BUTTONS.BEGIN, 'begin');
   }
+
+  keyboard = withStartWebAppButton(keyboard);
 
   // Если это callback query (нажатие на кнопку), редактируем сообщение
   if (ctx.callbackQuery) {
