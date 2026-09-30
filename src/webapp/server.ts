@@ -2,6 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import logger from '../utils/logger.js';
+import { handleWebAppApi } from './api.js';
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -24,6 +25,31 @@ function resolveWebAppFile(urlPath: string): string | null {
   return filePath;
 }
 
+function serveStatic(res: http.ServerResponse, urlPath: string): void {
+  const filePath = resolveWebAppFile(urlPath);
+
+  if (!filePath) {
+    res.writeHead(403);
+    res.end('Forbidden');
+    return;
+  }
+
+  fs.readFile(filePath, (error, data) => {
+    if (error) {
+      res.writeHead(404);
+      res.end('Not found');
+      return;
+    }
+
+    const extension = path.extname(filePath);
+    res.writeHead(200, {
+      'Content-Type': MIME_TYPES[extension] ?? 'application/octet-stream',
+      'Cache-Control': 'no-cache',
+    });
+    res.end(data);
+  });
+}
+
 export function startWebAppServer(port: number): void {
   if (server) {
     return;
@@ -31,27 +57,16 @@ export function startWebAppServer(port: number): void {
 
   server = http.createServer((req, res) => {
     const urlPath = decodeURIComponent((req.url ?? '/').split('?')[0] ?? '/');
-    const filePath = resolveWebAppFile(urlPath);
-
-    if (!filePath) {
-      res.writeHead(403);
-      res.end('Forbidden');
-      return;
-    }
-
-    fs.readFile(filePath, (error, data) => {
-      if (error) {
-        res.writeHead(404);
-        res.end('Not found');
-        return;
+    void handleWebAppApi(req, res, urlPath).then((handled) => {
+      if (!handled) {
+        serveStatic(res, urlPath);
       }
-
-      const extension = path.extname(filePath);
-      res.writeHead(200, {
-        'Content-Type': MIME_TYPES[extension] ?? 'application/octet-stream',
-        'Cache-Control': 'no-cache',
-      });
-      res.end(data);
+    }).catch((error) => {
+      logger.error('WebApp request error:', error);
+      if (!res.headersSent) {
+        res.writeHead(500);
+        res.end('Internal error');
+      }
     });
   });
 

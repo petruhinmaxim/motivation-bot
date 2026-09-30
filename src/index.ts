@@ -8,6 +8,7 @@ import { schedulerService } from './services/scheduler.service.js';
 import { closeRedis } from './redis/client.js';
 import { env } from './utils/env.js';
 import { startWebAppServer, stopWebAppServer } from './webapp/server.js';
+import { setWebAppMenuButton } from './webapp/button.js';
 
 dotenv.config();
 
@@ -60,6 +61,8 @@ async function start() {
     startWebAppServer(env.WEBAPP_PORT);
     if (env.WEBAPP_URL) {
       logger.info(`WebApp public URL: ${env.WEBAPP_URL}`);
+      await setWebAppMenuButton(bot.api);
+      logger.info('Menu button opens the WebApp');
     } else {
       logger.warn('WEBAPP_URL is not set. The Start Webapp button is hidden until an https URL is configured.');
     }

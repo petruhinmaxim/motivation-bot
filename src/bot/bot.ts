@@ -1,4 +1,5 @@
-import { Bot } from 'grammy';
+import { Bot, type ApiClientOptions } from 'grammy';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import { env } from '../utils/env.js';
 import { stateMiddleware } from './middleware.js';
 import logger from '../utils/logger.js';
@@ -7,7 +8,16 @@ import { notificationService } from '../services/notification.service.js';
 import { schedulerService } from '../services/scheduler.service.js';
 import { userService } from '../services/user.service.js';
 
-export const bot = new Bot(env.BOT_TOKEN);
+const proxy = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+const client: ApiClientOptions | undefined = proxy
+  ? {
+      baseFetchConfig: {
+        agent: new HttpsProxyAgent(proxy),
+      } as unknown as NonNullable<ApiClientOptions['baseFetchConfig']>,
+    }
+  : undefined;
+
+export const bot = new Bot(env.BOT_TOKEN, client ? { client } : undefined);
 
 // Обработчик события блокировки/разблокировки бота
 bot.on('my_chat_member', async (ctx) => {

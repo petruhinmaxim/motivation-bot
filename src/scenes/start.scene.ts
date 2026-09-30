@@ -1,53 +1,29 @@
-import { InlineKeyboard } from 'grammy';
 import type { Context } from 'grammy';
-import { BUTTONS, MESSAGES } from './messages.js';
-import { challengeService } from '../services/challenge.service.js';
-import { withStartWebAppButton } from '../webapp/button.js';
+import { MESSAGES } from './messages.js';
+import { createStartKeyboard } from '../webapp/button.js';
 
 export async function handleStartScene(ctx: Context) {
   const userId = ctx.from?.id;
   if (!userId) return;
 
-  // Проверяем наличие активного челленджа
-  const activeChallenge = await challengeService.getActiveChallenge(userId);
-  
-  let messageText = MESSAGES.START.TEXT;
-  let keyboard: InlineKeyboard;
+  const messageText = MESSAGES.START.TEXT;
+  const keyboard = createStartKeyboard();
 
-  // Если есть активный челлендж, добавляем текст и кнопку
-  if (activeChallenge) {
-    messageText += MESSAGES.START.ACTIVE_CHALLENGE;
-    keyboard = new InlineKeyboard()
-      .text(BUTTONS.TO_CHALLENGE, 'challenge_stats')
-      .row()
-      .text(BUTTONS.INFO, 'info');
-  } else {
-    keyboard = new InlineKeyboard()
-      .text(BUTTONS.INFO, 'info')
-      .text(BUTTONS.BEGIN, 'begin');
-  }
-
-  keyboard = withStartWebAppButton(keyboard);
-
-  // Если это callback query (нажатие на кнопку), редактируем сообщение
   if (ctx.callbackQuery) {
     await ctx.editMessageText(messageText, {
       reply_markup: keyboard,
     });
     await ctx.answerCallbackQuery();
-  } else {
-    // Если это новое сообщение (команда /start), сначала удаляем reply keyboard
-    const removeMsg = await ctx.reply('.', {
-      reply_markup: { remove_keyboard: true },
-    });
-    
-    // Удаляем временное сообщение
-    await ctx.api.deleteMessage(ctx.chat!.id, removeMsg.message_id);
-    
-    // Затем отправляем основное сообщение с inline кнопками
-    await ctx.reply(messageText, {
-      reply_markup: keyboard,
-    });
+    return;
   }
-}
 
+  const removeMsg = await ctx.reply('.', {
+    reply_markup: { remove_keyboard: true },
+  });
+
+  await ctx.api.deleteMessage(ctx.chat!.id, removeMsg.message_id);
+
+  await ctx.reply(messageText, {
+    reply_markup: keyboard,
+  });
+}

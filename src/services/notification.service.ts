@@ -17,13 +17,11 @@ import {
 } from '../redis/keys.js';
 import { challengeService } from './challenge.service.js';
 import { userService } from './user.service.js';
-import { getRandomReminderPhrase } from '../utils/motivational-phrases.js';
 import { getMissedDayImagePath } from '../utils/missed-days-images.js';
 import { getRandomMissedDaysText } from '../utils/missed-days-texts.js';
 import { formatDateToString, getYesterdayDateString } from '../utils/date-utils.js';
-import { handleChallengeStatsScene } from '../scenes/challenge-stats.scene.js';
 import { handleTelegramError } from '../utils/telegram-error-handler.js';
-import { BUTTONS } from '../scenes/messages.js';
+import { BUTTONS, MESSAGES } from '../scenes/messages.js';
 
 interface DailyReminderData {
   userId: number;
@@ -197,7 +195,7 @@ class NotificationService {
   /**
    * Вычисляет следующее время ежедневного уведомления с учетом часового пояса
    */
-  private getNextReminderTime(reminderTime: string, timezone: number): Date {
+  private getNextReminderTime(reminderTime: string, timezone: number, notBefore?: Date): Date {
     const now = new Date();
     const [hours, minutes] = reminderTime.split(':').map(Number);
     
@@ -223,8 +221,14 @@ class NotificationService {
       : targetLocalMs;
     
     // Конвертируем обратно в UTC: вычитаем смещение часового пояса
-    const nextTargetUtcMs = nextTargetLocalMs - timezoneOffsetMs;
-    
+    let nextTargetUtcMs = nextTargetLocalMs - timezoneOffsetMs;
+    const earliest = notBefore?.getTime();
+    if (earliest !== undefined) {
+      while (nextTargetUtcMs < earliest) {
+        nextTargetUtcMs += msPerDay;
+      }
+    }
+
     return new Date(nextTargetUtcMs);
   }
 
@@ -417,7 +421,7 @@ class NotificationService {
   /**
    * Планирует ежедневное уведомление
    */
-  async scheduleDailyReminder(userId: number, reminderTime: string, timezone: number): Promise<void> {
+  async scheduleDailyReminder(userId: number, reminderTime: string, timezone: number, notBefore?: Date): Promise<void> {
     // Отменяем предыдущее уведомление
     this.cancelDailyReminder(userId);
 
@@ -427,13 +431,13 @@ class NotificationService {
       return;
     }
 
-    const scheduledTime = this.getNextReminderTime(reminderTime, timezone);
+    const scheduledTime = this.getNextReminderTime(reminderTime, timezone, notBefore);
     const now = new Date();
     const delay = scheduledTime.getTime() - now.getTime();
 
     if (delay <= 0) {
       // Время уже прошло, планируем на завтра
-      const tomorrowTime = this.getNextReminderTime(reminderTime, timezone);
+      const tomorrowTime = this.getNextReminderTime(reminderTime, timezone, notBefore);
       const tomorrowDelay = tomorrowTime.getTime() - now.getTime();
       await this.scheduleDailyReminderInternal(userId, reminderTime, timezone, tomorrowTime, tomorrowDelay, challenge.id);
       return;
@@ -527,43 +531,7 @@ class NotificationService {
         return;
       }
 
-      // Дополнительная проверка: проверяем, было ли фото загружено вчера
-      // Это предотвращает race condition, когда напоминание отправляется раньше,
-      // чем проверка пропущенных дней в 4:00 увеличит счетчик
-      const user = await userService.getUser(userId);
-      const timezone = user?.timezone ?? 3;
-      const yesterdayDate = getYesterdayDateString(timezone);
-      const hadPhotoYesterday = await challengeService.hasPhotoUploadedToday(userId, yesterdayDate);
-      
-      if (!hadPhotoYesterday) {
-        logger.info(`Skipping reminder for user ${userId}: no photo uploaded yesterday (date: ${yesterdayDate})`);
-        // Не отправляем напоминание, если фото не было загружено вчера
-        // Уведомление о пропущенном дне будет отправлено проверкой в 4:00
-        return;
-      }
-
-      // Отправляем случайную фразу
-      const reminderPhrase = getRandomReminderPhrase();
-      await this.botApi.sendMessage(userId, reminderPhrase);
-
-      // Отправляем сцену статистики
-      const mockContext = {
-        from: { id: userId },
-        reply: async (text: string, options?: any) => {
-          return this.botApi!.sendMessage(userId, text, {
-            ...options,
-            disable_notification: true,
-          });
-        },
-        editMessageText: async (text: string, options?: any) => {
-          return this.botApi!.sendMessage(userId, text, {
-            ...options,
-            disable_notification: true,
-          });
-        },
-      } as any;
-
-      await handleChallengeStatsScene(mockContext);
+      await this.botApi.sendMessage(userId, MESSAGES.DAILY_REMINDER);
       logger.info(`Daily reminder sent to user ${userId}`);
     } catch (error) {
       const shouldCancel = handleTelegramError(error, userId);
@@ -1159,9 +1127,10 @@ class NotificationService {
           // Создаем ежедневное напоминание, если оно включено
           if (challenge.reminderStatus && challenge.reminderTime) {
             const reminderTime = challenge.reminderTime.slice(0, 5); // HH:MM
+            const notBefore = challenge.startDate > new Date() ? challenge.startDate : undefined;
             // Вычисляем время заранее для логирования
-            const scheduledTime = this.getNextReminderTime(reminderTime, timezone);
-            await this.scheduleDailyReminder(challenge.userId, reminderTime, timezone);
+            const scheduledTime = this.getNextReminderTime(reminderTime, timezone, notBefore);
+            await this.scheduleDailyReminder(challenge.userId, reminderTime, timezone, notBefore);
             
             logger.info(
               `User ${challenge.userId}: Scheduled daily reminder at ${reminderTime} ` +

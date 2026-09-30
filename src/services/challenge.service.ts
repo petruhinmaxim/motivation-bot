@@ -174,6 +174,22 @@ export class ChallengeService {
     }
   }
 
+  async setActivityDays(userId: number, days: number[]): Promise<void> {
+    const challenge = await this.getActiveChallenge(userId);
+    if (!challenge) {
+      throw new Error(`Active challenge not found for user ${userId}`);
+    }
+
+    const activityDays = [...new Set(days)].sort((left, right) => left - right).join(',');
+    await db
+      .update(challenges)
+      .set({
+        activityDays,
+        updatedAt: new Date(),
+      })
+      .where(eq(challenges.id, challenge.id));
+  }
+
   /**
    * Отключает напоминания для активного челленджа (время напоминания сохраняется)
    */
